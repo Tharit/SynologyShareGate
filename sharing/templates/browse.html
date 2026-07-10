@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <link rel="icon" href="data:,">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Download Files</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      font-size: 15px;
+      line-height: 1.5;
+      color: #1a1a1a;
+      background: #f8f8f8;
+      margin: 0;
+      padding: 0;
+    }
+    header {
+      background: #fff;
+      border-bottom: 1px solid #e0e0e0;
+      padding: 1rem 1.5rem;
+    }
+    header h1 { margin: 0; font-size: 1.25rem; font-weight: 600; color: #111; }
+    main { max-width: 960px; margin: 0 auto; padding: 1.5rem 1rem; }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.5rem 0.75rem;
+      margin-bottom: 1.25rem;
+    }
+    nav.breadcrumb {
+      font-size: 0.875rem;
+      color: #555;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.25rem;
+      min-height: 1.5rem;
+      flex: 1;
+    }
+    nav.breadcrumb a { color: #0066cc; text-decoration: none; }
+    nav.breadcrumb a:hover { text-decoration: underline; }
+    nav.breadcrumb .sep { color: #bbb; margin: 0 0.1rem; }
+    nav.breadcrumb .current { color: #333; }
+    .btn-dl-zip {
+      flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3em;
+      padding: 0.3rem 0.7rem;
+      font-size: 0.8125rem;
+      font-weight: 500;
+      color: #0066cc;
+      background: #f0f6ff;
+      border: 1px solid #c5d8ef;
+      border-radius: 5px;
+      text-decoration: none;
+      white-space: nowrap;
+      line-height: 1.4;
+    }
+    .btn-dl-zip:hover { background: #daeafb; border-color: #aac8e8; }
+    .file-table-wrap {
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    table { width: 100%; border-collapse: collapse; }
+    thead tr { background: #f0f0f0; border-bottom: 1px solid #e0e0e0; }
+    th {
+      text-align: left;
+      padding: 0.6rem 1rem;
+      font-size: 0.8rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: #555;
+    }
+    td { padding: 0.65rem 1rem; border-bottom: 1px solid #f0f0f0; vertical-align: middle; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #fafafa; }
+    td.name a { color: #0066cc; text-decoration: none; font-weight: 500; }
+    td.name a:hover { text-decoration: underline; }
+    td.name .icon { display: inline-block; width: 1.1em; margin-right: 0.4em; text-align: center; opacity: 0.6; }
+    td.size, td.modified { color: #555; font-size: 0.875rem; white-space: nowrap; }
+    .status-row td {
+      padding: 2.5rem 1rem;
+      text-align: center;
+      color: #888;
+      font-size: 0.95rem;
+    }
+    .error-box {
+      background: #fff3f3;
+      border: 1px solid #f5c0c0;
+      border-radius: 6px;
+      padding: 2rem 1.5rem;
+      text-align: center;
+      color: #c00;
+    }
+    .error-box h2 { margin: 0 0 0.5rem; font-size: 1.1rem; }
+    .error-box p { margin: 0; color: #555; font-size: 0.9rem; }
+    @media (max-width: 600px) {
+      th.size, td.size, th.modified, td.modified { display: none; }
+    }
+  </style>
+</head>
+<body>
+<header>
+  <h1>Download Files</h1>
+</header>
+<main>
+  {{if .Error}}
+  <div class="error-box">
+    <h2>{{.Error.Title}}</h2>
+    <p>{{.Error.Detail}}</p>
+  </div>
+  {{else}}
+  <div class="toolbar">
+    <nav class="breadcrumb" id="breadcrumb"></nav>
+    <a id="dl-zip-btn" href="#" class="btn-dl-zip">&#8595; Download ZIP</a>
+  </div>
+  <div class="file-table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th class="size">Size</th>
+          <th class="modified">Modified</th>
+        </tr>
+      </thead>
+      <tbody id="file-tbody">
+        <tr class="status-row"><td colspan="3">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+  {{end}}
+</main>
+
+{{if not .Error}}
+<script>
+(function () {
+  'use strict';
+
+  var sharingID = {{.SharingID | js}};
+  var shareName = {{.ShareName | js}};
+
+  var tbody      = document.getElementById('file-tbody');
+  var breadcrumb = document.getElementById('breadcrumb');
+  var dlZipBtn   = document.getElementById('dl-zip-btn');
+
+  var currentPath = '/';
+
+  function updateDownloadBtn(folderPath) {
+    dlZipBtn.href = '/api/sharing/download-folder'
+      + '?id='   + encodeURIComponent(sharingID)
+      + '&path=' + encodeURIComponent(folderPath);
+  }
+
+  function navigate(newPath) {
+    currentPath = newPath;
+    updateDownloadBtn(newPath);
+    loadFiles(newPath);
+  }
+
+  function loadFiles(folderPath) {
+    tbody.innerHTML = '<tr class="status-row"><td colspan="3">Loading…</td></tr>';
+    renderBreadcrumb(folderPath);
+
+    var url = '/api/sharing/list'
+      + '?id='   + encodeURIComponent(sharingID)
+      + '&path=' + encodeURIComponent(folderPath);
+
+    fetch(url)
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!data.success) {
+          showError(data.error || 'Failed to load files.');
+          return;
+        }
+        renderFiles(data.files || []);
+      })
+      .catch(function () { showError('Network error — could not reach the server.'); });
+  }
+
+  function renderFiles(files) {
+    if (files.length === 0) {
+      tbody.innerHTML = '<tr class="status-row"><td colspan="3">This folder is empty.</td></tr>';
+      return;
+    }
+
+    var html = '';
+    for (var i = 0; i < files.length; i++) {
+      var f = files[i];
+      var nameCell;
+      if (f.is_dir) {
+        nameCell = '<a href="#" data-path="' + escAttr(f.path) + '">'
+          + '<span class="icon">&#128193;</span>' + escHTML(f.name) + '</a>';
+      } else {
+        var dlURL = '/api/sharing/download'
+          + '?id='   + encodeURIComponent(sharingID)
+          + '&path=' + encodeURIComponent(f.path);
+        nameCell = '<a href="' + escAttr(dlURL) + '" download="' + escAttr(f.name) + '">'
+          + '<span class="icon">&#128196;</span>' + escHTML(f.name) + '</a>';
+      }
+      html += '<tr>'
+        + '<td class="name">' + nameCell + '</td>'
+        + '<td class="size">'     + (f.is_dir ? '&mdash;' : escHTML(f.size_human)) + '</td>'
+        + '<td class="modified">' + escHTML(f.mtime) + '</td>'
+        + '</tr>';
+    }
+    tbody.innerHTML = html;
+
+    // Attach click handlers to folder links.
+    var links = tbody.querySelectorAll('a[data-path]');
+    for (var j = 0; j < links.length; j++) {
+      links[j].addEventListener('click', function (e) {
+        e.preventDefault();
+        navigate(this.getAttribute('data-path'));
+      });
+    }
+  }
+
+  function renderBreadcrumb(folderPath) {
+    // Strip leading slash to get the relative portion.
+    var rel = folderPath.replace(/^\//, '');
+    var parts = rel ? rel.split('/') : [];
+
+    var html = '';
+    // Root crumb.
+    if (parts.length === 0) {
+      html += '<span class="current">' + escHTML(shareName) + '</span>';
+    } else {
+      html += '<a href="#" data-nav="/">' + escHTML(shareName) + '</a>'
+           + '<span class="sep">/</span>';
+      for (var i = 0; i < parts.length; i++) {
+        var accum = '/' + parts.slice(0, i + 1).join('/');
+        if (i === parts.length - 1) {
+          html += '<span class="current">' + escHTML(parts[i]) + '</span>';
+        } else {
+          html += '<a href="#" data-nav="' + escAttr(accum) + '">' + escHTML(parts[i]) + '</a>'
+               + '<span class="sep">/</span>';
+        }
+      }
+    }
+    breadcrumb.innerHTML = html;
+
+    var navLinks = breadcrumb.querySelectorAll('a[data-nav]');
+    for (var j = 0; j < navLinks.length; j++) {
+      navLinks[j].addEventListener('click', function (e) {
+        e.preventDefault();
+        navigate(this.getAttribute('data-nav'));
+      });
+    }
+  }
+
+  function showError(msg) {
+    tbody.innerHTML = '<tr class="status-row"><td colspan="3">' + escHTML(msg) + '</td></tr>';
+  }
+
+  function escHTML(s) {
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function escAttr(s) { return escHTML(s); }
+
+  // Initial load.
+  updateDownloadBtn(currentPath);
+  loadFiles(currentPath);
+})();
+</script>
+{{end}}
+</body>
+</html>

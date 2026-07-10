@@ -1,0 +1,23 @@
+services:
+  service-syno-proxy:
+    container_name: service-syno-proxy
+    image: syno-proxy:latest
+    build: .
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    ports:
+      - "8080:8080"
+    environment:
+      SYNO_HOST: "192.168.1.10:5001" # must replace with your Synology NAS hostname and port
+      # SYNO_HTTPS: "true"          # default: true
+      # SYNO_SKIP_VERIFY: "false"   # set true only for self-signed certs (warns loudly)
+      # LISTEN_ADDR: ":8080"        # default: :8080
+      # RATE_LIMIT_RPM: "60"        # default: 60 req/min per IP
+      # MAX_TRACKED_IPS: "1000"    # default: 1000 distinct IPs tracked by rate limiter
+      # LOG_LEVEL: "info"           # "info" or "debug"
+      # DEV_MODE: "false"          # set true for local HTTP testing (disables Secure cookie + HSTS)
+      # TRUSTED_PROXIES: ""         # comma-separated CIDRs, e.g. "10.0.0.0/8,172.16.0.0/12"
+    restart: unless-stopped
