@@ -5,4 +5,3 @@
 # Improvements
 
 - Review & improve overall layout / design / style
-- Upload fails: pressing upload button again does nothing says "all files uploaded successfully"??

@@ -338,7 +338,7 @@ func (h *Handler) APIUpload(w http.ResponseWriter, r *http.Request) {
 	sidCookie, err := r.Cookie("sid")
 	if err != nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{
-			"success": false, "error": "no session — please reload the share page",
+			"success": false, "error": "no session — please reload the share page", "retryable": false,
 		})
 		return
 	}
@@ -350,7 +350,7 @@ func (h *Handler) APIUpload(w http.ResponseWriter, r *http.Request) {
 	mr, err := r.MultipartReader()
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
-			"success": false, "error": "expected multipart/form-data request",
+			"success": false, "error": "expected multipart/form-data request", "retryable": false,
 		})
 		return
 	}
@@ -368,12 +368,12 @@ func (h *Handler) APIUpload(w http.ResponseWriter, r *http.Request) {
 			var maxErr *http.MaxBytesError
 			if errors.As(err, &maxErr) {
 				writeJSON(w, http.StatusRequestEntityTooLarge, map[string]any{
-					"success": false, "error": fmt.Sprintf("upload exceeds the %d-byte limit", maxErr.Limit),
+					"success": false, "error": fmt.Sprintf("upload exceeds the %d-byte limit", maxErr.Limit), "retryable": false,
 				})
 				return
 			}
 			writeJSON(w, http.StatusBadRequest, map[string]any{
-				"success": false, "error": "error reading upload",
+				"success": false, "error": "error reading upload", "retryable": false,
 			})
 			return
 		}
@@ -422,7 +422,7 @@ func (h *Handler) APIUpload(w http.ResponseWriter, r *http.Request) {
 
 	if !validSharingID(id) || uploaderName == "" || filePart == nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
-			"success": false, "error": "missing or invalid id, uploader_name, or file field",
+			"success": false, "error": "missing or invalid id, uploader_name, or file field", "retryable": false,
 		})
 		return
 	}
@@ -430,7 +430,7 @@ func (h *Handler) APIUpload(w http.ResponseWriter, r *http.Request) {
 	if err := CheckUploadPermission(r.Context(), h.client, id, sid, uploaderName, filename, fileSize); err != nil {
 		h.logger.Debug("upload permission denied", middleware.F("err", err.Error()))
 		writeJSON(w, http.StatusForbidden, map[string]any{
-			"success": false, "error": sharingErrorPage(err).Title,
+			"success": false, "error": sharingErrorPage(err).Title, "retryable": isRetryableUploadError(err),
 		})
 		return
 	}
@@ -439,13 +439,13 @@ func (h *Handler) APIUpload(w http.ResponseWriter, r *http.Request) {
 		var maxErr *http.MaxBytesError
 		if errors.As(err, &maxErr) {
 			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]any{
-				"success": false, "error": fmt.Sprintf("file exceeds the %d-byte upload limit", maxErr.Limit),
+				"success": false, "error": fmt.Sprintf("file exceeds the %d-byte upload limit", maxErr.Limit), "retryable": false,
 			})
 			return
 		}
 		h.logger.Debug("upload error", middleware.F("err", err.Error()))
 		writeJSON(w, http.StatusBadGateway, map[string]any{
-			"success": false, "error": sharingErrorPage(err).Title,
+			"success": false, "error": sharingErrorPage(err).Title, "retryable": isRetryableUploadError(err),
 		})
 		return
 	}
@@ -471,6 +471,15 @@ func (h *Handler) renderUpload(w http.ResponseWriter, data *uploadData) {
 	if err := uploadTmpl.Execute(w, data); err != nil {
 		h.logger.Error("upload template error", middleware.F("err", err.Error()))
 	}
+}
+
+// isRetryableUploadError reports whether err is a transient failure between the
+// app and the NAS rather than an error the NAS itself returned in its response.
+func isRetryableUploadError(err error) bool {
+	var synoErr *proxy.SynoError
+	var httpErr *proxy.HTTPError
+	var maxErr *http.MaxBytesError
+	return !errors.As(err, &synoErr) && !errors.As(err, &httpErr) && !errors.As(err, &maxErr)
 }
 
 // sharingErrorPage maps a Synology or network error to user-facing text.

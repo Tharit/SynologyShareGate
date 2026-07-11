@@ -87,10 +87,11 @@
     .file-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .file-size { color: #888; font-size: 0.8rem; white-space: nowrap; }
     .file-status { font-size: 0.8rem; white-space: nowrap; min-width: 5rem; text-align: right; }
-    .file-status.pending  { color: #888; }
+    .file-status.pending   { color: #888; }
     .file-status.uploading { color: #0066cc; }
-    .file-status.done     { color: #1a8a1a; }
-    .file-status.error    { color: #c00; }
+    .file-status.done      { color: #1a8a1a; }
+    .file-status.error     { color: #c00; }
+    .file-status.retryable { color: #b35900; }
     .remove-btn {
       background: none;
       border: none;
@@ -281,8 +282,8 @@
     doneBanner.style.display = 'none';
 
     var pending = files.filter(function(e) {
-      return e.statusEl.className.indexOf('done') === -1 &&
-             e.statusEl.className.indexOf('error') === -1;
+      return e.statusEl.classList.contains('pending') ||
+             e.statusEl.classList.contains('retryable');
     });
 
     uploadSequential(pending, name, 0);
@@ -290,7 +291,9 @@
 
   function uploadSequential(items, name, idx) {
     if (idx >= items.length) {
-      var hasError = items.some(function(e) { return e.statusEl.classList.contains('error'); });
+      var hasError = files.some(function(e) {
+        return e.statusEl.classList.contains('error') || e.statusEl.classList.contains('retryable');
+      });
       if (!hasError) doneBanner.style.display = 'block';
       nameInput.disabled = false;
       uploadBtn.disabled = false;
@@ -316,6 +319,9 @@
       if (data.success) {
         item.statusEl.className = 'file-status done';
         item.statusEl.textContent = '✓ Done';
+      } else if (data.retryable) {
+        item.statusEl.className = 'file-status retryable';
+        item.statusEl.textContent = '↻ ' + (data.error || 'Failed');
       } else {
         item.statusEl.className = 'file-status error';
         item.statusEl.textContent = '✗ ' + (data.error || 'Failed');
@@ -323,8 +329,8 @@
       uploadSequential(items, name, idx + 1);
     })
     .catch(function(err) {
-      item.statusEl.className = 'file-status error';
-      item.statusEl.textContent = '✗ Network error';
+      item.statusEl.className = 'file-status retryable';
+      item.statusEl.textContent = '↻ Network error';
       uploadSequential(items, name, idx + 1);
     });
   }
