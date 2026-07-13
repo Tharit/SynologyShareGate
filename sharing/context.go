@@ -56,15 +56,18 @@ type SharingContext struct {
 	SIDExpires time.Time
 }
 
-// sidResult carries the sharing_sid value and any TTL attributes from the NAS.
+// sidResult carries the sharing_sid value, any TTL attributes from the NAS,
+// and the sharing_status parsed from the sharing HTML page.
 type sidResult struct {
-	Value   string
-	MaxAge  int
-	Expires time.Time
+	Value         string
+	MaxAge        int
+	Expires       time.Time
+	SharingStatus string // parsed from the <script src> in the sharing HTML page
 }
 
 // FetchSID hits the Synology sharing HTML page for the given sharing ID and returns
-// the sharing_sid session cookie together with any TTL attributes set by the NAS.
+// the sharing_sid session cookie together with any TTL attributes set by the NAS,
+// and the sharing_status parsed from the embedded script tag src URL.
 // The TTL fields are zero if Synology did not set them.
 func FetchSID(ctx context.Context, client *proxy.Client, sharingID string) (sidResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
@@ -80,26 +83,64 @@ func FetchSID(ctx context.Context, client *proxy.Client, sharingID string) (sidR
 	if err != nil {
 		return sidResult{}, fmt.Errorf("sid request: %w", err)
 	}
-	// Discard body — we only need the Set-Cookie header.
-	io.Copy(io.Discard, resp.Body) //nolint:errcheck
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // 1 MB cap
 	resp.Body.Close()
+	if readErr != nil {
+		return sidResult{}, fmt.Errorf("read sharing page: %w", readErr)
+	}
 
 	if resp.StatusCode >= 400 {
 		return sidResult{}, &proxy.HTTPError{StatusCode: resp.StatusCode}
 	}
 
+	sr := sidResult{SharingStatus: parseSharingStatusFromHTML(body)}
 	for _, cookie := range resp.Cookies() {
 		if cookie.Name == "sharing_sid" {
-			return sidResult{
-				Value:   cookie.Value,
-				MaxAge:  cookie.MaxAge,
-				Expires: cookie.Expires,
-			}, nil
+			sr.Value = cookie.Value
+			sr.MaxAge = cookie.MaxAge
+			sr.Expires = cookie.Expires
+			break
 		}
 	}
-	// No sharing_sid cookie — normal for password-protected shares, which only
+	// No sharing_sid cookie is normal for password-protected shares, which only
 	// set the cookie after a successful SYNO.Core.Sharing.Login call.
-	return sidResult{}, nil
+	return sr, nil
+}
+
+// parseSharingStatusFromHTML finds the <script src="...SYNO.Core.Sharing.Session...">
+// tag in the Synology sharing HTML page and extracts the sharing_status query parameter
+// from its src URL.  Synology embeds the real status in this URL; the API itself just
+// echoes back whatever value is passed as a GET parameter.
+func parseSharingStatusFromHTML(body []byte) string {
+	s := string(body)
+	const apiMarker = "SYNO.Core.Sharing.Session"
+	idx := strings.Index(s, apiMarker)
+	if idx < 0 {
+		return ""
+	}
+	// Walk backward from the marker to find the opening src=" of this tag.
+	srcIdx := strings.LastIndex(s[:idx], `src="`)
+	if srcIdx < 0 {
+		return ""
+	}
+	rest := s[srcIdx+len(`src="`):]
+	end := strings.IndexByte(rest, '"')
+	if end < 0 {
+		return ""
+	}
+	// Unescape HTML-attribute entities before parsing as a URL.
+	// &amp; → & (query parameter separator).
+	// &quot; → %22 so the embedded JSON-style quotes don't split query parameters.
+	rawSrc := rest[:end]
+	rawSrc = strings.ReplaceAll(rawSrc, "&amp;", "&")
+	rawSrc = strings.ReplaceAll(rawSrc, "&quot;", "%22")
+	u, err := url.Parse(rawSrc)
+	if err != nil {
+		return ""
+	}
+	// Synology wraps enum values in JSON-style double quotes, e.g. "password".
+	// Strip them after URL-decoding.
+	return strings.Trim(u.Query().Get("sharing_status"), `"`)
 }
 
 // GetContext fetches and parses the sharing context for the given sharing ID.
@@ -110,26 +151,52 @@ func FetchSID(ctx context.Context, client *proxy.Client, sharingID string) (sidR
 // When the share is password-protected the returned SharingContext will have
 // SharingStatus == "password" and an empty RootPath; the caller must prompt
 // for a password and call LoginWithPassword before accessing share content.
+// IsUpload is always set correctly even for locked password shares.
 func GetContext(ctx context.Context, client *proxy.Client, logger *middleware.Logger, sharingID, sid string) (*SharingContext, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
+	logger.Debug("GetContext1")
+
 	var sidMaxAge int
 	var sidExpires time.Time
+	sharingStatus := ""
+
 	if sid == "" {
 		sr, err := FetchSID(ctx, client, sharingID)
 		if err != nil {
 			return nil, fmt.Errorf("fetch session: %w", err)
 		}
-		sid, sidMaxAge, sidExpires = sr.Value, sr.MaxAge, sr.Expires
+		sid = sr.Value
+		sidMaxAge, sidExpires = sr.MaxAge, sr.Expires
+		sharingStatus = sr.SharingStatus
+
+		logger.Debug("sharing status", middleware.F("status", sharingStatus))
+
+		// If the NAS did not issue a SID the share is locked.
+		if sid == "" {
+			switch sharingStatus {
+			case "user":
+				return nil, errUserAuthRequired
+			case "password":
+				// Fall through: call the Session API with an empty SID to learn
+				// is_sharing_upload (available before authentication — Synology
+				// loads this endpoint as a <script> tag on initial page load).
+			default:
+				return nil, fmt.Errorf("share did not establish a session (sharing_status: %q)", sharingStatus)
+			}
+		}
 	}
 
+	logger.Debug("GetContext2")
+
+	// We have a SID — call the Session API to get the full share context.
 	params := url.Values{}
 	params.Set("api", "SYNO.Core.Sharing.Session")
 	params.Set("version", "1")
 	params.Set("method", "get")
 	params.Set("sharing_id", synoQuote(sharingID))
-	params.Set("sharing_status", `"none"`)
+	params.Set("sharing_status", sharingStatus) // plain value; API echoes it back
 	params.Set("v", fmt.Sprintf("%d", time.Now().Unix()))
 
 	reqURL := client.BaseURL() + "/sharing/webapi/entry.cgi?" + params.Encode()
@@ -137,16 +204,21 @@ func GetContext(ctx context.Context, client *proxy.Client, logger *middleware.Lo
 	if err != nil {
 		return nil, fmt.Errorf("build context request: %w", err)
 	}
+	// Replicate the unauthenticated <script> tag request for pre-auth shares:
+	// send no cookie and no X-Syno-Sharing header so Synology returns the JS
+	// context format rather than a JSON auth error.
 	if sid != "" {
 		req.AddCookie(&http.Cookie{Name: "sharing_sid", Value: sid})
+		req.Header.Set("X-Syno-Sharing", sharingID)
 	}
-	req.Header.Set("X-Syno-Sharing", sharingID)
 
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("context request: %w", err)
 	}
 	defer resp.Body.Close()
+
+	logger.Debug("GetContext3")
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // 1 MB cap
 	if err != nil {
@@ -155,36 +227,58 @@ func GetContext(ctx context.Context, client *proxy.Client, logger *middleware.Lo
 
 	session, extra, err := parseJSContext(body)
 	if err != nil {
+		if sid == "" {
+			// Pre-auth call returned something unexpected (e.g. Synology returned
+			// a JSON error instead of the JS context). Fall back to a plain
+			// password prompt; the reload-after-unlock path in browse.html handles
+			// the upload case if IsUpload can't be determined here.
+			logger.Debug("pre-auth session parse failed", middleware.F("err", err.Error()))
+			return &SharingContext{
+				SharingID:     sharingID,
+				SharingStatus: "password",
+				SIDMaxAge:     sidMaxAge,
+				SIDExpires:    sidExpires,
+			}, nil
+		}
 		return nil, fmt.Errorf("parse context: %w", err)
 	}
 
-	// Shares requiring Synology account credentials are not supported by this proxy.
+	logger.Debug("GetContext4")
+
+	// Fallback user check in case HTML parsing failed to detect it.
 	if session.SharingStatus == "user" {
 		return nil, errUserAuthRequired
 	}
 
-	// Password-protected shares must be unlocked via LoginWithPassword before
-	// any share content is available; return early so the caller can prompt.
-	if session.SharingStatus == "password" {
+	// Password-locked: return early with IsUpload/Extra info from the Session API.
+	// The Session API exposes is_sharing_upload (and upload request metadata) even
+	// before authentication, so the correct template can be chosen for the prompt.
+	if sid == "" {
 		return &SharingContext{
-			SharingID:     session.SharingID,
-			Hostname:      session.Hostname,
+			SharingID:     sharingID,
 			SharingStatus: "password",
-			SID:           sid,
+			IsUpload:      extra.IsSharingUpload,
+			Extra:         extra,
 			SIDMaxAge:     sidMaxAge,
 			SIDExpires:    sidExpires,
 		}, nil
 	}
 
-	// For any other sharing_status the share is publicly accessible, so
-	// Synology must have issued a sharing_sid on the page load. If we have
-	// none at this point, the share page is broken or unreachable.
-	if sid == "" {
-		return nil, fmt.Errorf("sharing_sid cookie not found — the share did not establish a session")
-	}
-
 	if extra.Status != 0 {
 		return nil, proxy.SynoErrorFromCode(extra.Status)
+	}
+
+	// Synology omits filename from the Session API for password-protected browse
+	// shares even after authentication — fetch it from Initdata instead.
+	if !extra.IsSharingUpload && extra.Filename == "" {
+		filename, err := FetchInitdata(ctx, client, sharingID, sid)
+		if err != nil {
+			return nil, fmt.Errorf("fetch share name: %w", err)
+		}
+		if filename == "" {
+			return nil, fmt.Errorf("sharing context has no root folder name")
+		}
+		extra.Filename = filename
 	}
 
 	if !extra.IsSharingUpload && extra.Filename == "" {
@@ -277,6 +371,59 @@ func LoginWithPassword(ctx context.Context, client *proxy.Client, sharingID, pas
 		}
 	}
 	return sr, nil
+}
+
+// initdataResponse mirrors the Synology JSON for SYNO.Core.Sharing.Initdata.
+type initdataResponse struct {
+	Data struct {
+		Private struct {
+			Filename string `json:"filename"`
+		} `json:"Private"`
+	} `json:"data"`
+	Error struct {
+		Code int `json:"code"`
+	} `json:"error"`
+	Success bool `json:"success"`
+}
+
+// FetchInitdata retrieves the root folder name for an authenticated
+// password-protected share. Synology only exposes the filename through this
+// endpoint — the Session API never returns it for password-protected shares.
+func FetchInitdata(ctx context.Context, client *proxy.Client, sharingID, sid string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	body := url.Values{}
+	body.Set("api", "SYNO.Core.Sharing.Initdata")
+	body.Set("method", "get")
+	body.Set("version", "1")
+
+	reqURL := client.BaseURL() + "/sharing/webapi/entry.cgi"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL,
+		strings.NewReader(body.Encode()))
+	if err != nil {
+		return "", fmt.Errorf("build initdata request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(&http.Cookie{Name: "sharing_sid", Value: sid})
+	req.Header.Set("X-Syno-Sharing", sharingID)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("initdata request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var ir initdataResponse
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 16<<20)).Decode(&ir); err != nil {
+		return "", fmt.Errorf("parse initdata response: %w", err)
+	}
+
+	if !ir.Success {
+		return "", proxy.SynoErrorFromCode(ir.Error.Code)
+	}
+
+	return ir.Data.Private.Filename, nil
 }
 
 // parseJSContext extracts the two JSON objects from Synology's JS-formatted response.

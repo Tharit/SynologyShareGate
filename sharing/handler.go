@@ -62,10 +62,11 @@ type browseData struct {
 
 // uploadData is the template data for upload.html.
 type uploadData struct {
-	SharingID   string
-	RequestName string
-	RequestInfo string
-	Error       *errorPage
+	SharingID           string
+	RequestName         string
+	RequestInfo         string
+	IsPasswordProtected bool
+	Error               *errorPage
 }
 
 // fileJSONEntry is a single file/folder entry in the APIList JSON response.
@@ -105,10 +106,19 @@ func (h *Handler) Browse(w http.ResponseWriter, r *http.Request) {
 	// Show the password form without setting a session cookie — the
 	// unauthenticated SID must not be persisted as if it were valid.
 	if sc.SharingStatus == "password" {
-		h.renderBrowse(w, &browseData{
-			SharingID:           id,
-			IsPasswordProtected: true,
-		})
+		if sc.IsUpload {
+			h.renderUpload(w, &uploadData{
+				SharingID:           id,
+				RequestName:         sc.Extra.RequestName,
+				RequestInfo:         sc.Extra.RequestInfo,
+				IsPasswordProtected: true,
+			})
+		} else {
+			h.renderBrowse(w, &browseData{
+				SharingID:           id,
+				IsPasswordProtected: true,
+			})
+		}
 		return
 	}
 
@@ -188,7 +198,19 @@ func (h *Handler) APIUnlock(w http.ResponseWriter, r *http.Request) {
 		MaxAge:   sr.MaxAge,
 		Expires:  sr.Expires,
 	})
-	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+
+	// Fetch share context so the frontend can transition without a page reload.
+	sc, err := GetContext(r.Context(), h.client, h.logger, req.ID, sr.Value)
+	if err != nil {
+		h.logger.Debug("unlock context error", middleware.F("err", err.Error()))
+		writeJSON(w, http.StatusOK, map[string]any{"success": true})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success":   true,
+		"shareName": sc.Extra.Filename,
+		"isUpload":  sc.IsUpload,
+	})
 }
 
 // APIList handles GET /api/sharing/list — returns a JSON file listing.

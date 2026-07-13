@@ -136,6 +136,59 @@
       font-weight: 600;
       margin-top: 1rem;
     }
+    .password-wrap {
+      display: flex;
+      justify-content: center;
+      padding: 3rem 1rem;
+    }
+    .password-card {
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 2rem 2.5rem;
+      width: 100%;
+      max-width: 380px;
+      text-align: center;
+    }
+    .password-card h2 {
+      margin: 0 0 0.35rem;
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: #111;
+    }
+    .password-card p {
+      margin: 0 0 1.25rem;
+      color: #666;
+      font-size: 0.9rem;
+    }
+    .password-card input[type="password"] {
+      width: 100%;
+      padding: 0.55rem 0.75rem;
+      font-size: 1rem;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+      outline: none;
+      margin-bottom: 0.75rem;
+    }
+    .password-card input[type="password"]:focus { border-color: #0066cc; box-shadow: 0 0 0 2px rgba(0,102,204,0.15); }
+    .password-card button {
+      width: 100%;
+      padding: 0.6rem 1rem;
+      font-size: 1rem;
+      font-weight: 500;
+      color: #fff;
+      background: #0066cc;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    .password-card button:hover { background: #0055aa; }
+    .password-card button:disabled { background: #99bbdd; cursor: default; }
+    .password-error {
+      margin-top: 0.75rem;
+      font-size: 0.875rem;
+      color: #c00;
+    }
   </style>
 </head>
 <body>
@@ -149,33 +202,45 @@
     <p>{{.Error.Detail}}</p>
   </div>
   {{else}}
-  {{if or .RequestName .RequestInfo}}
-  <div class="request-info">
-    {{if .RequestName}}
-    <div><strong>{{.RequestName}}</strong></div>
+  <div id="password-section"{{if not .IsPasswordProtected}} style="display:none"{{end}}>
+    <div class="password-wrap">
+      <div class="password-card">
+        <h2>Password Required</h2>
+        <p>This share is password-protected. Enter the password to continue.</p>
+        <input type="password" id="share-password" placeholder="Password" autocomplete="current-password"{{if .IsPasswordProtected}} autofocus{{end}}>
+        <button id="unlock-btn">Unlock</button>
+        <p id="password-error" class="password-error" hidden></p>
+      </div>
+    </div>
+  </div>
+  <div id="upload-section"{{if .IsPasswordProtected}} style="display:none"{{end}}>
+    {{if or .RequestName .RequestInfo}}
+    <div class="request-info">
+      {{if .RequestName}}
+      <div><strong>{{.RequestName}}</strong></div>
+      {{end}}
+      {{if .RequestInfo}}
+      <div>{{.RequestInfo}}</div>
+      {{end}}
+    </div>
     {{end}}
-    {{if .RequestInfo}}
-    <div>{{.RequestInfo}}</div>
-    {{end}}
+
+    <div class="name-field">
+      <label for="uploader-name">Your name</label>
+      <input type="text" id="uploader-name" placeholder="Enter your name" autocomplete="name">
+    </div>
+
+    <div id="drop-zone" role="button" tabindex="0" aria-label="Drop files here or click to select">
+      <div>Drop files here or <strong>click to select</strong></div>
+      <div class="hint">Multiple files supported</div>
+    </div>
+    <input type="file" id="file-input" multiple hidden>
+
+    <ul id="file-list"></ul>
+
+    <button id="upload-btn" disabled>Upload</button>
+    <div id="done-banner">All files uploaded successfully.</div>
   </div>
-  {{end}}
-  
-
-  <div class="name-field">
-    <label for="uploader-name">Your name</label>
-    <input type="text" id="uploader-name" placeholder="Enter your name" autocomplete="name">
-  </div>
-
-  <div id="drop-zone" role="button" tabindex="0" aria-label="Drop files here or click to select">
-    <div>Drop files here or <strong>click to select</strong></div>
-    <div class="hint">Multiple files supported</div>
-  </div>
-  <input type="file" id="file-input" multiple hidden>
-
-  <ul id="file-list"></ul>
-
-  <button id="upload-btn" disabled>Upload</button>
-  <div id="done-banner">All files uploaded successfully.</div>
   {{end}}
 </main>
 
@@ -185,12 +250,64 @@
   'use strict';
 
   var sharingID = {{.SharingID | js}};
-  var fileInput = document.getElementById('file-input');
-  var dropZone  = document.getElementById('drop-zone');
-  var fileList  = document.getElementById('file-list');
-  var uploadBtn = document.getElementById('upload-btn');
-  var nameInput = document.getElementById('uploader-name');
+
+  var passwordSection = document.getElementById('password-section');
+  var uploadSection   = document.getElementById('upload-section');
+  var fileInput  = document.getElementById('file-input');
+  var dropZone   = document.getElementById('drop-zone');
+  var fileList   = document.getElementById('file-list');
+  var uploadBtn  = document.getElementById('upload-btn');
+  var nameInput  = document.getElementById('uploader-name');
   var doneBanner = document.getElementById('done-banner');
+
+  // ── Password unlock ────────────────────────────────────────────────────────
+
+  var pwInput = document.getElementById('share-password');
+  var unlockBtn = document.getElementById('unlock-btn');
+  var errEl   = document.getElementById('password-error');
+
+  function showPasswordError(msg) {
+    errEl.textContent = msg;
+    errEl.hidden = false;
+  }
+
+  function doUnlock() {
+    var password = pwInput.value;
+    if (!password) { pwInput.focus(); return; }
+
+    unlockBtn.disabled = true;
+    errEl.hidden = true;
+
+    fetch('/api/sharing/unlock', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: sharingID, password: password })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.success) {
+          passwordSection.style.display = 'none';
+          uploadSection.style.display = '';
+        } else {
+          showPasswordError(data.error || 'Unlock failed.');
+          unlockBtn.disabled = false;
+          pwInput.select();
+        }
+      })
+      .catch(function () {
+        showPasswordError('Network error — could not reach the server.');
+        unlockBtn.disabled = false;
+      });
+  }
+
+  if (unlockBtn) {
+    unlockBtn.addEventListener('click', doUnlock);
+    pwInput.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { doUnlock(); }
+    });
+  }
+
+  // ── File uploader ──────────────────────────────────────────────────────────
 
   // files array: { file: File, li: Element, statusEl: Element }
   var files = [];

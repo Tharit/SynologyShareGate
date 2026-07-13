@@ -169,49 +169,64 @@
     <h2>{{.Error.Title}}</h2>
     <p>{{.Error.Detail}}</p>
   </div>
-  {{else if .IsPasswordProtected}}
-  <div class="password-wrap">
-    <div class="password-card">
-      <h2>Password Required</h2>
-      <p>This share is password-protected. Enter the password to continue.</p>
-      <input type="password" id="share-password" placeholder="Password" autocomplete="current-password" autofocus>
-      <button id="unlock-btn">Unlock</button>
-      <p id="password-error" class="password-error" hidden></p>
+  {{else}}
+  <div id="password-section"{{if not .IsPasswordProtected}} style="display:none"{{end}}>
+    <div class="password-wrap">
+      <div class="password-card">
+        <h2>Password Required</h2>
+        <p>This share is password-protected. Enter the password to continue.</p>
+        <input type="password" id="share-password" placeholder="Password" autocomplete="current-password"{{if .IsPasswordProtected}} autofocus{{end}}>
+        <button id="unlock-btn">Unlock</button>
+        <p id="password-error" class="password-error" hidden></p>
+      </div>
     </div>
   </div>
-  {{else}}
-  <div class="toolbar">
-    <nav class="breadcrumb" id="breadcrumb"></nav>
-    <a id="dl-zip-btn" href="#" class="btn-dl-zip">&#8595; Download ZIP</a>
-  </div>
-  <div class="file-table-wrap">
-    <table>
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th class="size">Size</th>
-          <th class="modified">Modified</th>
-        </tr>
-      </thead>
-      <tbody id="file-tbody">
-        <tr class="status-row"><td colspan="3">Loading…</td></tr>
-      </tbody>
-    </table>
+  <div id="browse-section"{{if .IsPasswordProtected}} style="display:none"{{end}}>
+    <div class="toolbar">
+      <nav class="breadcrumb" id="breadcrumb"></nav>
+      <a id="dl-zip-btn" href="#" class="btn-dl-zip">&#8595; Download ZIP</a>
+    </div>
+    <div class="file-table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th class="size">Size</th>
+            <th class="modified">Modified</th>
+          </tr>
+        </thead>
+        <tbody id="file-tbody">
+          <tr class="status-row"><td colspan="3">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
   </div>
   {{end}}
 </main>
 
-{{if .IsPasswordProtected}}
+{{if not .Error}}
 <script>
 (function () {
   'use strict';
 
-  var sharingID  = {{.SharingID | js}};
-  var input      = document.getElementById('share-password');
-  var btn        = document.getElementById('unlock-btn');
-  var errEl      = document.getElementById('password-error');
+  var sharingID = {{.SharingID | js}};
+  var shareName = {{.ShareName | js}};
 
-  function showError(msg) {
+  var passwordSection = document.getElementById('password-section');
+  var browseSection   = document.getElementById('browse-section');
+  var tbody           = document.getElementById('file-tbody');
+  var breadcrumb      = document.getElementById('breadcrumb');
+  var dlZipBtn        = document.getElementById('dl-zip-btn');
+
+  var currentPath = '/';
+
+  // ── Password unlock ────────────────────────────────────────────────────────
+
+  var input  = document.getElementById('share-password');
+  var btn    = document.getElementById('unlock-btn');
+  var errEl  = document.getElementById('password-error');
+
+  function showPasswordError(msg) {
     errEl.textContent = msg;
     errEl.hidden = false;
   }
@@ -231,38 +246,35 @@
       .then(function (r) { return r.json(); })
       .then(function (data) {
         if (data.success) {
-          window.location.reload();
+          if (data.isUpload) {
+            // Upload shares are server-rendered; a reload is needed.
+            window.location.reload();
+            return;
+          }
+          shareName = data.shareName || '';
+          passwordSection.style.display = 'none';
+          browseSection.style.display = '';
+          navigate('/');
         } else {
-          showError(data.error || 'Unlock failed.');
+          showPasswordError(data.error || 'Unlock failed.');
           btn.disabled = false;
           input.select();
         }
       })
       .catch(function () {
-        showError('Network error — could not reach the server.');
+        showPasswordError('Network error — could not reach the server.');
         btn.disabled = false;
       });
   }
 
-  btn.addEventListener('click', doUnlock);
-  input.addEventListener('keydown', function (e) {
-    if (e.key === 'Enter') { doUnlock(); }
-  });
-})();
-</script>
-{{else if not .Error}}
-<script>
-(function () {
-  'use strict';
+  if (btn) {
+    btn.addEventListener('click', doUnlock);
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { doUnlock(); }
+    });
+  }
 
-  var sharingID = {{.SharingID | js}};
-  var shareName = {{.ShareName | js}};
-
-  var tbody      = document.getElementById('file-tbody');
-  var breadcrumb = document.getElementById('breadcrumb');
-  var dlZipBtn   = document.getElementById('dl-zip-btn');
-
-  var currentPath = '/';
+  // ── File browser ───────────────────────────────────────────────────────────
 
   function updateDownloadBtn(folderPath) {
     dlZipBtn.href = '/api/sharing/download-folder'
@@ -288,12 +300,12 @@
       .then(function (r) { return r.json(); })
       .then(function (data) {
         if (!data.success) {
-          showError(data.error || 'Failed to load files.');
+          showListError(data.error || 'Failed to load files.');
           return;
         }
         renderFiles(data.files || []);
       })
-      .catch(function () { showError('Network error — could not reach the server.'); });
+      .catch(function () { showListError('Network error — could not reach the server.'); });
   }
 
   function renderFiles(files) {
@@ -324,7 +336,6 @@
     }
     tbody.innerHTML = html;
 
-    // Attach click handlers to folder links.
     var links = tbody.querySelectorAll('a[data-path]');
     for (var j = 0; j < links.length; j++) {
       links[j].addEventListener('click', function (e) {
@@ -335,12 +346,10 @@
   }
 
   function renderBreadcrumb(folderPath) {
-    // Strip leading slash to get the relative portion.
     var rel = folderPath.replace(/^\//, '');
     var parts = rel ? rel.split('/') : [];
 
     var html = '';
-    // Root crumb.
     if (parts.length === 0) {
       html += '<span class="current">' + escHTML(shareName) + '</span>';
     } else {
@@ -367,7 +376,7 @@
     }
   }
 
-  function showError(msg) {
+  function showListError(msg) {
     tbody.innerHTML = '<tr class="status-row"><td colspan="3">' + escHTML(msg) + '</td></tr>';
   }
 
@@ -381,9 +390,10 @@
 
   function escAttr(s) { return escHTML(s); }
 
-  // Initial load.
-  updateDownloadBtn(currentPath);
-  loadFiles(currentPath);
+  // Start loading immediately for non-password shares.
+  if (browseSection.style.display !== 'none') {
+    navigate('/');
+  }
 })();
 </script>
 {{end}}

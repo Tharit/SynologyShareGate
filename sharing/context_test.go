@@ -143,6 +143,46 @@ func TestParseJSContext_Upload(t *testing.T) {
 	}
 }
 
+func TestParseSharingStatusFromHTML(t *testing.T) {
+	// The real Synology HTML wraps enum values in JSON-style double quotes encoded
+	// as &quot; in the HTML attribute, e.g. sharing_status=&quot;password&quot;.
+	cases := []struct {
+		name string
+		html string
+		want string
+	}{
+		{
+			name: "password share",
+			html: `<script type="text/javascript" src="webapi/entry.cgi?api=SYNO.Core.Sharing.Session&amp;version=1&amp;method=get&amp;sharing_id=&quot;RPom3rorP&quot;&amp;sharing_status=&quot;password&quot;&v=1763722670"></script>`,
+			want: "password",
+		},
+		{
+			name: "public share",
+			html: `<script type="text/javascript" src="webapi/entry.cgi?api=SYNO.Core.Sharing.Session&amp;version=1&amp;method=get&amp;sharing_id=&quot;pKGFcZ6A4&quot;&amp;sharing_status=&quot;none&quot;&v=1234567890"></script>`,
+			want: "none",
+		},
+		{
+			name: "user share",
+			html: `<script type="text/javascript" src="webapi/entry.cgi?api=SYNO.Core.Sharing.Session&amp;sharing_status=&quot;user&quot;&v=1"></script>`,
+			want: "user",
+		},
+		{
+			name: "marker absent",
+			html: `<html><body>nothing here</body></html>`,
+			want: "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := parseSharingStatusFromHTML([]byte(tc.html))
+			if got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestEncodeDLink(t *testing.T) {
 	// From the API doc: /02.10.2009 - Tisch/IMG_0095.JPG → hex of UTF-8 bytes.
 	p := "/02.10.2009 - Tisch/IMG_0095.JPG"
