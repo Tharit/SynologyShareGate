@@ -97,7 +97,9 @@ func FetchSID(ctx context.Context, client *proxy.Client, sharingID string) (sidR
 			}, nil
 		}
 	}
-	return sidResult{}, fmt.Errorf("sharing_sid cookie not found in response from %s", reqURL)
+	// No sharing_sid cookie — normal for password-protected shares, which only
+	// set the cookie after a successful SYNO.Core.Sharing.Login call.
+	return sidResult{}, nil
 }
 
 // GetContext fetches and parses the sharing context for the given sharing ID.
@@ -135,7 +137,9 @@ func GetContext(ctx context.Context, client *proxy.Client, logger *middleware.Lo
 	if err != nil {
 		return nil, fmt.Errorf("build context request: %w", err)
 	}
-	req.AddCookie(&http.Cookie{Name: "sharing_sid", Value: sid})
+	if sid != "" {
+		req.AddCookie(&http.Cookie{Name: "sharing_sid", Value: sid})
+	}
 	req.Header.Set("X-Syno-Sharing", sharingID)
 
 	resp, err := client.Do(req)
@@ -170,6 +174,13 @@ func GetContext(ctx context.Context, client *proxy.Client, logger *middleware.Lo
 			SIDMaxAge:     sidMaxAge,
 			SIDExpires:    sidExpires,
 		}, nil
+	}
+
+	// For any other sharing_status the share is publicly accessible, so
+	// Synology must have issued a sharing_sid on the page load. If we have
+	// none at this point, the share page is broken or unreachable.
+	if sid == "" {
+		return nil, fmt.Errorf("sharing_sid cookie not found — the share did not establish a session")
 	}
 
 	if extra.Status != 0 {
