@@ -101,6 +101,59 @@
     }
     .error-box h2 { margin: 0 0 0.5rem; font-size: 1.1rem; }
     .error-box p { margin: 0; color: #555; font-size: 0.9rem; }
+    .password-wrap {
+      display: flex;
+      justify-content: center;
+      padding: 3rem 1rem;
+    }
+    .password-card {
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 2rem 2.5rem;
+      width: 100%;
+      max-width: 380px;
+      text-align: center;
+    }
+    .password-card h2 {
+      margin: 0 0 0.35rem;
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: #111;
+    }
+    .password-card p {
+      margin: 0 0 1.25rem;
+      color: #666;
+      font-size: 0.9rem;
+    }
+    .password-card input[type="password"] {
+      width: 100%;
+      padding: 0.55rem 0.75rem;
+      font-size: 1rem;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+      outline: none;
+      margin-bottom: 0.75rem;
+    }
+    .password-card input[type="password"]:focus { border-color: #0066cc; box-shadow: 0 0 0 2px rgba(0,102,204,0.15); }
+    .password-card button {
+      width: 100%;
+      padding: 0.6rem 1rem;
+      font-size: 1rem;
+      font-weight: 500;
+      color: #fff;
+      background: #0066cc;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    .password-card button:hover { background: #0055aa; }
+    .password-card button:disabled { background: #99bbdd; cursor: default; }
+    .password-error {
+      margin-top: 0.75rem;
+      font-size: 0.875rem;
+      color: #c00;
+    }
     @media (max-width: 600px) {
       th.size, td.size, th.modified, td.modified { display: none; }
     }
@@ -115,6 +168,16 @@
   <div class="error-box">
     <h2>{{.Error.Title}}</h2>
     <p>{{.Error.Detail}}</p>
+  </div>
+  {{else if .IsPasswordProtected}}
+  <div class="password-wrap">
+    <div class="password-card">
+      <h2>Password Required</h2>
+      <p>This share is password-protected. Enter the password to continue.</p>
+      <input type="password" id="share-password" placeholder="Password" autocomplete="current-password" autofocus>
+      <button id="unlock-btn">Unlock</button>
+      <p id="password-error" class="password-error" hidden></p>
+    </div>
   </div>
   {{else}}
   <div class="toolbar">
@@ -138,7 +201,56 @@
   {{end}}
 </main>
 
-{{if not .Error}}
+{{if .IsPasswordProtected}}
+<script>
+(function () {
+  'use strict';
+
+  var sharingID  = {{.SharingID | js}};
+  var input      = document.getElementById('share-password');
+  var btn        = document.getElementById('unlock-btn');
+  var errEl      = document.getElementById('password-error');
+
+  function showError(msg) {
+    errEl.textContent = msg;
+    errEl.hidden = false;
+  }
+
+  function doUnlock() {
+    var password = input.value;
+    if (!password) { input.focus(); return; }
+
+    btn.disabled = true;
+    errEl.hidden = true;
+
+    fetch('/api/sharing/unlock', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: sharingID, password: password })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.success) {
+          window.location.reload();
+        } else {
+          showError(data.error || 'Unlock failed.');
+          btn.disabled = false;
+          input.select();
+        }
+      })
+      .catch(function () {
+        showError('Network error — could not reach the server.');
+        btn.disabled = false;
+      });
+  }
+
+  btn.addEventListener('click', doUnlock);
+  input.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { doUnlock(); }
+  });
+})();
+</script>
+{{else if not .Error}}
 <script>
 (function () {
   'use strict';

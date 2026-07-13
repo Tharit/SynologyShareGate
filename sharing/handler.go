@@ -54,9 +54,10 @@ type errorPage struct {
 
 // browseData is the template data for browse.html.
 type browseData struct {
-	ShareName string
-	SharingID string
-	Error     *errorPage
+	ShareName           string
+	SharingID           string
+	IsPasswordProtected bool
+	Error               *errorPage
 }
 
 // uploadData is the template data for upload.html.
@@ -78,6 +79,7 @@ type fileJSONEntry struct {
 
 // Browse handles GET /sharing/{id} — renders the browse or upload skeleton.
 // File listing is not included; the JS fetches it via /api/sharing/list.
+// For password-protected shares a password prompt is rendered instead.
 func (h *Handler) Browse(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if !validSharingID(id) {
@@ -85,37 +87,108 @@ func (h *Handler) Browse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, err := GetContext(r.Context(), h.client, h.logger, id, "")
+	// Re-use an existing authenticated SID from the session cookie so that
+	// returning visitors (including those who have already unlocked a
+	// password-protected share) are not prompted again unnecessarily.
+	sid := ""
+	if c, err := r.Cookie("sid"); err == nil {
+		sid = c.Value
+	}
+
+	sc, err := GetContext(r.Context(), h.client, h.logger, id, sid)
 	if err != nil {
 		h.logger.Debug("get context error", middleware.F("err", err.Error()))
 		h.renderBrowseError(w, sharingErrorPage(err))
 		return
 	}
 
+	// Show the password form without setting a session cookie — the
+	// unauthenticated SID must not be persisted as if it were valid.
+	if sc.SharingStatus == "password" {
+		h.renderBrowse(w, &browseData{
+			SharingID:           id,
+			IsPasswordProtected: true,
+		})
+		return
+	}
+
 	http.SetCookie(w, &http.Cookie{
 		Name:     "sid",
-		Value:    ctx.SID,
+		Value:    sc.SID,
 		Path:     "/api/sharing/",
 		HttpOnly: true,
 		Secure:   !h.devMode,
 		SameSite: http.SameSiteStrictMode,
-		MaxAge:   ctx.SIDMaxAge,
-		Expires:  ctx.SIDExpires,
+		MaxAge:   sc.SIDMaxAge,
+		Expires:  sc.SIDExpires,
 	})
 
-	if ctx.IsUpload {
+	if sc.IsUpload {
 		h.renderUpload(w, &uploadData{
 			SharingID:   id,
-			RequestName: ctx.Extra.RequestName,
-			RequestInfo: ctx.Extra.RequestInfo,
+			RequestName: sc.Extra.RequestName,
+			RequestInfo: sc.Extra.RequestInfo,
 		})
 		return
 	}
 
 	h.renderBrowse(w, &browseData{
-		ShareName: ctx.Extra.Filename,
+		ShareName: sc.Extra.Filename,
 		SharingID: id,
 	})
+}
+
+// APIUnlock handles POST /api/sharing/unlock — authenticates a password-protected
+// share and sets the session cookie on success.
+// Request body: JSON {"id": "...", "password": "..."}.
+func (h *Handler) APIUnlock(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 4<<10) // 4 KB cap — id + password only
+
+	var req struct {
+		ID       string `json:"id"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"success": false, "error": "invalid request body",
+		})
+		return
+	}
+
+	if !validSharingID(req.ID) {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"success": false, "error": "missing or invalid share id",
+		})
+		return
+	}
+
+	sr, err := LoginWithPassword(r.Context(), h.client, req.ID, req.Password)
+	if err != nil {
+		h.logger.Debug("unlock error", middleware.F("err", err.Error()))
+		var synoErr *proxy.SynoError
+		if errors.As(err, &synoErr) && synoErr.Code == 1001 {
+			writeJSON(w, http.StatusUnauthorized, map[string]any{
+				"success": false, "error": "Wrong password.",
+			})
+			return
+		}
+		writeJSON(w, http.StatusBadGateway, map[string]any{
+			"success": false, "error": "Could not authenticate with the file server.",
+		})
+		return
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "sid",
+		Value:    sr.Value,
+		Path:     "/api/sharing/",
+		HttpOnly: true,
+		Secure:   !h.devMode,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   sr.MaxAge,
+		Expires:  sr.Expires,
+	})
+	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
 }
 
 // APIList handles GET /api/sharing/list — returns a JSON file listing.

@@ -138,6 +138,7 @@ func main() {
 	mux.Handle("GET /photo/{id}", wrap(photo.HandlePage))
 	mux.Handle("GET /drive/{id}", wrap(drive.HandlePage))
 	mux.Handle("GET /api/sharing/list", wrap(sh.APIList))
+	mux.Handle("POST /api/sharing/unlock", wrap(sh.APIUnlock))
 	mux.Handle("GET /api/photo/", wrap(photo.HandleAPI))
 	mux.Handle("GET /api/drive/", wrap(drive.HandleAPI))
 

@@ -36,6 +36,9 @@ type SharingContext struct {
 	SharingID string
 	Hostname  string
 	Extra     ExtraSession
+	// SharingStatus mirrors SYNO.SDS.Session.sharing_status. It is "password"
+	// when the share requires a password before content can be accessed.
+	SharingStatus string
 	// IsUpload is true when this share is a file-request (upload) share.
 	IsUpload bool
 	// RootPath is the NAS folder path to list for browse shares.
@@ -96,6 +99,10 @@ func FetchSID(ctx context.Context, client *proxy.Client, sharingID string) (sidR
 // If sid is non-empty it is used directly and FetchSID is skipped. If sid is
 // empty, a fresh SID is fetched first. The SID used is always included in the
 // returned SharingContext.
+//
+// When the share is password-protected the returned SharingContext will have
+// SharingStatus == "password" and an empty RootPath; the caller must prompt
+// for a password and call LoginWithPassword before accessing share content.
 func GetContext(ctx context.Context, client *proxy.Client, logger *middleware.Logger, sharingID, sid string) (*SharingContext, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -142,6 +149,19 @@ func GetContext(ctx context.Context, client *proxy.Client, logger *middleware.Lo
 		return nil, fmt.Errorf("parse context: %w", err)
 	}
 
+	// Password-protected shares must be unlocked via LoginWithPassword before
+	// any share content is available; return early so the caller can prompt.
+	if session.SharingStatus == "password" {
+		return &SharingContext{
+			SharingID:     session.SharingID,
+			Hostname:      session.Hostname,
+			SharingStatus: "password",
+			SID:           sid,
+			SIDMaxAge:     sidMaxAge,
+			SIDExpires:    sidExpires,
+		}, nil
+	}
+
 	if extra.Status != 0 {
 		return nil, proxy.SynoErrorFromCode(extra.Status)
 	}
@@ -151,18 +171,91 @@ func GetContext(ctx context.Context, client *proxy.Client, logger *middleware.Lo
 	}
 
 	sc := &SharingContext{
-		SharingID:  session.SharingID,
-		Hostname:   session.Hostname,
-		Extra:      extra,
-		IsUpload:   extra.IsSharingUpload,
-		SID:        sid,
-		SIDMaxAge:  sidMaxAge,
-		SIDExpires: sidExpires,
+		SharingID:     session.SharingID,
+		Hostname:      session.Hostname,
+		SharingStatus: session.SharingStatus,
+		Extra:         extra,
+		IsUpload:      extra.IsSharingUpload,
+		SID:           sid,
+		SIDMaxAge:     sidMaxAge,
+		SIDExpires:    sidExpires,
 	}
 	if !extra.IsSharingUpload {
 		sc.RootPath = "/" + extra.Filename
 	}
 	return sc, nil
+}
+
+// loginResponse mirrors the Synology JSON for SYNO.Core.Sharing.Login.
+type loginResponse struct {
+	Data struct {
+		SharingSID string `json:"sharing_sid"`
+	} `json:"data"`
+	Error struct {
+		Code   int    `json:"code"`
+		Errors string `json:"errors"`
+	} `json:"error"`
+	Success bool `json:"success"`
+}
+
+// LoginWithPassword authenticates against a password-protected share and returns
+// the resulting sharing_sid together with any TTL attributes from the response cookie.
+// A non-nil error is returned for wrong passwords (SynoError code 1001) as well as
+// network/parse failures.
+func LoginWithPassword(ctx context.Context, client *proxy.Client, sharingID, password string) (sidResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	params := url.Values{}
+	params.Set("api", "SYNO.Core.Sharing.Login")
+	params.Set("method", "login")
+	params.Set("version", "1")
+	params.Set("sharing_id", sharingID)
+	params.Set("password", password)
+
+	reqURL := client.BaseURL() + "/sharing/webapi/entry.cgi/SYNO.Core.Sharing.Login"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL,
+		strings.NewReader(params.Encode()))
+	if err != nil {
+		return sidResult{}, fmt.Errorf("build login request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return sidResult{}, fmt.Errorf("login request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 64<<10)) // 64 KB cap
+	if err != nil {
+		return sidResult{}, fmt.Errorf("read login response: %w", err)
+	}
+
+	var lr loginResponse
+	if err := json.Unmarshal(raw, &lr); err != nil {
+		return sidResult{}, fmt.Errorf("parse login response: %w", err)
+	}
+
+	if !lr.Success {
+		return sidResult{}, &proxy.SynoError{Code: lr.Error.Code, Msg: lr.Error.Errors}
+	}
+
+	if lr.Data.SharingSID == "" {
+		return sidResult{}, fmt.Errorf("login succeeded but response contained no sharing_sid")
+	}
+
+	// The SID value comes from the JSON body; TTL attributes come from the cookie
+	// that Synology sets on the same response.
+	sr := sidResult{Value: lr.Data.SharingSID}
+	for _, c := range resp.Cookies() {
+		if c.Name == "sharing_sid" {
+			sr.MaxAge = c.MaxAge
+			sr.Expires = c.Expires
+			break
+		}
+	}
+	return sr, nil
 }
 
 // parseJSContext extracts the two JSON objects from Synology's JS-formatted response.
