@@ -3,6 +3,7 @@ package sharing
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +14,10 @@ import (
 	"github.com/tharit/synologysharegate/middleware"
 	"github.com/tharit/synologysharegate/proxy"
 )
+
+// errUserAuthRequired is returned by GetContext when a share requires Synology
+// account credentials (sharing_status == "user"), which this proxy does not support.
+var errUserAuthRequired = errors.New("share requires Synology user credentials")
 
 // SharingSession is the parsed SYNO.SDS.Session object.
 type SharingSession struct {
@@ -147,6 +152,11 @@ func GetContext(ctx context.Context, client *proxy.Client, logger *middleware.Lo
 	session, extra, err := parseJSContext(body)
 	if err != nil {
 		return nil, fmt.Errorf("parse context: %w", err)
+	}
+
+	// Shares requiring Synology account credentials are not supported by this proxy.
+	if session.SharingStatus == "user" {
+		return nil, errUserAuthRequired
 	}
 
 	// Password-protected shares must be unlocked via LoginWithPassword before

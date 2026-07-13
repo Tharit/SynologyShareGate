@@ -571,6 +571,9 @@ func isRetryableUploadError(err error) bool {
 
 // sharingErrorPage maps a Synology or network error to user-facing text.
 func sharingErrorPage(err error) *errorPage {
+	if errors.Is(err, errUserAuthRequired) {
+		return &errorPage{"Unsupported Share", "This share requires a Synology account to access, which is not supported."}
+	}
 	var httpErr *proxy.HTTPError
 	if errors.As(err, &httpErr) {
 		if httpErr.StatusCode == http.StatusNotFound {
