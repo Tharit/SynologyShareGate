@@ -159,6 +159,20 @@ func (h *Handler) APIList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Single-file share: SYNO.FolderSharing.List does not work on a file path.
+	// Return a synthetic one-entry listing; the frontend treats it like a folder.
+	if !sc.Extra.IsFolder && !sc.IsUpload {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"success": true,
+			"files": []fileJSONEntry{{
+				Name:  path.Base(sc.RootPath),
+				Path:  "/",
+				IsDir: false,
+			}},
+		})
+		return
+	}
+
 	entries, err := ListFiles(r.Context(), h.client, id, sid, fullPath)
 	if err != nil {
 		h.logger.Debug("list files error", middleware.F("err", err.Error()))
