@@ -88,15 +88,8 @@ func (h *Handler) Browse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Re-use an existing authenticated SID from the session cookie so that
-	// returning visitors (including those who have already unlocked a
-	// password-protected share) are not prompted again unnecessarily.
-	sid := ""
-	if c, err := r.Cookie("sid"); err == nil {
-		sid = c.Value
-	}
-
-	sc, err := GetContext(r.Context(), h.client, h.logger, id, sid)
+	// cookie is set only on api endpoint, always empty here, so that we can get the correct sharing status from synology
+	sc, err := GetContext(r.Context(), h.client, h.logger, id, "")
 	if err != nil {
 		h.logger.Debug("get context error", middleware.F("err", err.Error()))
 		h.renderBrowseError(w, sharingErrorPage(err))

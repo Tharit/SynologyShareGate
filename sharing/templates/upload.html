@@ -10,84 +10,89 @@
     body {
       font-family: system-ui, -apple-system, sans-serif;
       font-size: 15px;
-      line-height: 1.5;
-      color: #1a1a1a;
-      background: #f8f8f8;
+      line-height: 1.6;
+      color: #111;
+      background: #f7f7f7;
       margin: 0;
       padding: 0;
     }
     header {
       background: #fff;
-      border-bottom: 1px solid #e0e0e0;
-      padding: 1rem 1.5rem;
+      border-bottom: 1px solid #ebebeb;
+      padding: 0.875rem 2rem;
     }
-    header h1 { margin: 0; font-size: 1.25rem; font-weight: 600; }
+    header h1 { margin: 0; font-size: 1rem; font-weight: 600; letter-spacing: -0.01em; }
     main {
       max-width: 680px;
       margin: 0 auto;
-      padding: 2rem 1rem;
+      padding: 2.5rem 1.5rem;
     }
     .request-info {
-      background: #fff;
-      border: 1px solid #e0e0e0;
-      border-radius: 6px;
+      background: #f9f9f9;
+      border-radius: 8px;
       padding: 1rem 1.25rem;
-      margin-bottom: 1.5rem;
-      color: #444;
-      font-size: 0.95rem;
+      margin-bottom: 1.75rem;
+      color: #555;
+      font-size: 0.9375rem;
     }
     label {
       display: block;
       font-weight: 600;
       font-size: 0.875rem;
-      margin-bottom: 0.35rem;
-      color: #333;
+      margin-bottom: 0.4rem;
+      color: #444;
     }
     input[type="text"] {
       width: 100%;
-      padding: 0.55rem 0.75rem;
-      border: 1px solid #ccc;
-      border-radius: 4px;
-      font-size: 0.95rem;
+      padding: 0.6rem 0.875rem;
+      border: 1px solid #e0e0e0;
+      border-radius: 6px;
+      font-size: 0.9375rem;
       outline: none;
+      background: #fff;
       transition: border-color 0.15s;
     }
-    input[type="text"]:focus { border-color: #0066cc; }
-    .name-field { margin-bottom: 1.5rem; }
+    input[type="text"]:focus { border-color: #0066cc; box-shadow: 0 0 0 3px rgba(0,102,204,0.1); }
+    .name-field { margin-bottom: 2rem; }
     #drop-zone {
-      border: 2px dashed #ccc;
-      border-radius: 6px;
-      padding: 2.5rem 1rem;
+      border: 1.5px dashed #d0d0d0;
+      border-radius: 10px;
+      padding: 3rem 1rem;
       text-align: center;
       color: #888;
       cursor: pointer;
+      background: #fafafa;
       transition: border-color 0.15s, background 0.15s;
       user-select: none;
       margin-bottom: 1rem;
     }
-    #drop-zone.drag-over { border-color: #0066cc; background: #f0f6ff; color: #0066cc; }
-    #drop-zone .hint { font-size: 0.85rem; margin-top: 0.35rem; color: #aaa; }
+    #drop-zone:hover { border-color: #bbb; background: #f5f5f5; }
+    #drop-zone.drag-over { border-color: #0066cc; background: #eef4ff; color: #0066cc; }
+    #drop-zone .drop-icon { font-size: 1.75rem; line-height: 1; margin-bottom: 0.75rem; opacity: 0.35; }
+    #drop-zone .hint { font-size: 0.85rem; margin-top: 0.35rem; color: #bbb; }
     #file-list {
       list-style: none;
-      margin: 0 0 1.5rem;
+      margin: 0 0 2rem;
       padding: 0;
     }
     #file-list li {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 0.55rem 0.75rem;
-      background: #fff;
-      border: 1px solid #e8e8e8;
-      border-radius: 4px;
-      margin-bottom: 0.4rem;
+      padding: 0.65rem 0;
+      background: none;
+      border: none;
+      border-bottom: 1px solid #f0f0f0;
+      border-radius: 0;
+      margin-bottom: 0;
       font-size: 0.9rem;
       gap: 0.75rem;
     }
+    #file-list li:last-child { border-bottom: none; }
     .file-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .file-size { color: #888; font-size: 0.8rem; white-space: nowrap; }
+    .file-size { color: #aaa; font-size: 0.8rem; white-space: nowrap; }
     .file-status { font-size: 0.8rem; white-space: nowrap; min-width: 5rem; text-align: right; }
-    .file-status.pending   { color: #888; }
+    .file-status.pending   { color: #bbb; }
     .file-status.uploading { color: #0066cc; }
     .file-status.done      { color: #1a8a1a; }
     .file-status.error     { color: #c00; }
@@ -96,7 +101,7 @@
       background: none;
       border: none;
       cursor: pointer;
-      color: #bbb;
+      color: #ccc;
       font-size: 1rem;
       padding: 0 0.15rem;
       line-height: 1;
@@ -108,86 +113,95 @@
       background: #0066cc;
       color: #fff;
       border: none;
-      border-radius: 4px;
-      font-size: 1rem;
+      border-radius: 6px;
+      font-size: 0.9375rem;
       font-weight: 600;
       cursor: pointer;
       transition: background 0.15s;
     }
     #upload-btn:hover:not(:disabled) { background: #0052a3; }
-    #upload-btn:disabled { background: #aaa; cursor: default; }
+    #upload-btn:disabled { background: #c0c0c0; cursor: default; }
     .error-box {
-      background: #fff3f3;
-      border: 1px solid #f5c0c0;
-      border-radius: 6px;
+      background: #fff8f8;
+      border: 1px solid #f0cece;
+      border-radius: 8px;
       padding: 2rem 1.5rem;
       text-align: center;
       color: #c00;
     }
-    .error-box h2 { margin: 0 0 0.5rem; font-size: 1.1rem; }
-    .error-box p { margin: 0; color: #555; font-size: 0.9rem; }
+    .error-box h2 { margin: 0 0 0.5rem; font-size: 1.05rem; }
+    .error-box p { margin: 0; color: #666; font-size: 0.875rem; }
     #done-banner {
       display: none;
-      background: #edfaed;
-      border: 1px solid #9bd09b;
-      border-radius: 6px;
+      background: #f0faf0;
+      border: 1px solid #b8ddb8;
+      border-radius: 8px;
       padding: 1rem 1.25rem;
-      color: #1a8a1a;
+      color: #1a7a1a;
       font-weight: 600;
       margin-top: 1rem;
+      font-size: 0.9375rem;
     }
     .password-wrap {
       display: flex;
       justify-content: center;
-      padding: 3rem 1rem;
+      padding: 4rem 1rem;
     }
     .password-card {
       background: #fff;
-      border: 1px solid #e0e0e0;
-      border-radius: 8px;
-      padding: 2rem 2.5rem;
+      box-shadow: 0 2px 20px rgba(0,0,0,0.08), 0 0 0 1px rgba(0,0,0,0.04);
+      border-radius: 10px;
+      padding: 2.25rem 2.5rem;
       width: 100%;
-      max-width: 380px;
+      max-width: 360px;
       text-align: center;
     }
     .password-card h2 {
-      margin: 0 0 0.35rem;
-      font-size: 1.1rem;
+      margin: 0 0 0.4rem;
+      font-size: 1.05rem;
       font-weight: 600;
       color: #111;
+      letter-spacing: -0.01em;
     }
     .password-card p {
-      margin: 0 0 1.25rem;
-      color: #666;
-      font-size: 0.9rem;
+      margin: 0 0 1.5rem;
+      color: #777;
+      font-size: 0.875rem;
+      line-height: 1.5;
     }
     .password-card input[type="password"] {
       width: 100%;
-      padding: 0.55rem 0.75rem;
-      font-size: 1rem;
-      border: 1px solid #ccc;
-      border-radius: 5px;
+      padding: 0.6rem 0.875rem;
+      font-size: 0.9375rem;
+      border: 1px solid #e0e0e0;
+      border-radius: 6px;
       outline: none;
       margin-bottom: 0.75rem;
+      transition: border-color 0.15s;
     }
-    .password-card input[type="password"]:focus { border-color: #0066cc; box-shadow: 0 0 0 2px rgba(0,102,204,0.15); }
+    .password-card input[type="password"]:focus { border-color: #0066cc; box-shadow: 0 0 0 3px rgba(0,102,204,0.12); }
     .password-card button {
       width: 100%;
-      padding: 0.6rem 1rem;
-      font-size: 1rem;
-      font-weight: 500;
+      padding: 0.65rem 1rem;
+      font-size: 0.9375rem;
+      font-weight: 600;
       color: #fff;
       background: #0066cc;
       border: none;
-      border-radius: 5px;
+      border-radius: 6px;
       cursor: pointer;
+      transition: background 0.15s;
     }
     .password-card button:hover { background: #0055aa; }
-    .password-card button:disabled { background: #99bbdd; cursor: default; }
+    .password-card button:disabled { background: #a0c0e8; cursor: default; }
     .password-error {
       margin-top: 0.75rem;
-      font-size: 0.875rem;
-      color: #c00;
+      font-size: 0.85rem;
+      color: #cc3333;
+    }
+    @media (max-width: 600px) {
+      header { padding: 0.875rem 1rem; }
+      main { padding: 1.5rem 1rem; }
     }
   </style>
 </head>
@@ -231,6 +245,7 @@
     </div>
 
     <div id="drop-zone" role="button" tabindex="0" aria-label="Drop files here or click to select">
+      <div class="drop-icon">↑</div>
       <div>Drop files here or <strong>click to select</strong></div>
       <div class="hint">Multiple files supported</div>
     </div>
