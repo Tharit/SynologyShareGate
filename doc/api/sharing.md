@@ -370,6 +370,13 @@ Non-zero `ExtraSession.status` maps to the same error codes.
 3. `SYNO.FileStation.CheckPermission.write` — validate permission before each file upload
 4. `SYNO.FileStation.Upload.upload` — upload file (stream via multipart)
 
+**Password-protected upload request:**
+1. `GET /sharing/{id}` — detect `sharing_status=password` (no SID cookie issued)
+2. `SYNO.Core.Sharing.Session.get` — (no auth) confirm `is_sharing_upload=true`, get `request_name` / `request_info`
+3. `SYNO.Core.Sharing.Login.login` — authenticate with password, get `sharing_sid`
+3. `SYNO.FileStation.CheckPermission.write` — validate permission before each file upload
+4. `SYNO.FileStation.Upload.upload` — upload file (stream via multipart)
+
 **Download single file:**
 - `SYNO.FolderSharing.Download` — one GET, streams file directly (no separate API calls needed beyond the browse flow that provided the path)
 

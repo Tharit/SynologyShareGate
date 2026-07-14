@@ -160,15 +160,31 @@ api=SYNO.Core.Sharing.Login&method=login&version=1
 
 > **Note:** `sharing_id` and `password` are plain values — not JSON-quoted. (Same quirk as FileStation.)
 
-Response:
+Respons on success / correct password:
 ```json
 {
   "data": { "sharing_sid": "61XFf4kxM6fdwCj50whyl9n2rnzaU1CW" },
   "success": true
 }
 ```
+`Set-Cookie: sharing_sid=...` is also included in successful response, identical to the value in the body.
 
-Store the `sharing_sid` and include it as a cookie on all subsequent requests. `Browse.Item` returns `error.code 101` without it. Error code `1001` = wrong password.
+
+Respons on error / wrong password:
+```
+{
+    "error": {
+        "code": 1001,
+        "errors": "Execute Error: wrong protect passwd"
+    },
+    "success": false
+}
+```
+
+success: true/false is the primary signal; error code could be used to customize the error message for the frontend (everything beyond 1001 would be unknown error).
+
+Store the `sharing_sid` and include it as a cookie on all subsequent requests. 
+
 
 ### Step 3 — Get album info & list photos
 Same as Flow 1 Steps 2–3, now with the `sharing_sid` cookie set.
@@ -279,6 +295,8 @@ Example:
 GET /photo/synofoto/api/v2/p/Thumbnail/get?id=448643&cache_key="448643_1254476266"&type="unit"&size="sm"&passphrase="LESyyu3kf"&_sharing_id="LESyyu3kf"
 ```
 
+Parameters (e.g., cache_key, etc) are supplied by data from SYNO.Foto.Browse.Item endpoint.
+
 ---
 
 ## Download URL (Per Item)
@@ -326,8 +344,6 @@ passphrase="{passphrase}"
 - `download_type=convert` → compressed JPEG
 - No `X-Syno-Sharing` header; auth is via the `sharing_sid` cookie and/or `_SSID` session
 - Returns: `application/zip` with `Content-Disposition: attachment; filename="{album_name}.zip"`
-
-> **Note:** Download requires a valid session. For public links, the `sharing_sid` cookie appears to be set automatically on page load (mechanism: `Set-Cookie` from the initial HTML response). For password-protected links it comes from `SYNO.Core.Sharing.Login`. A third party implementation needs to capture the session cookie from the initial page request, or login before calling the download endpoint.
 
 ---
 
