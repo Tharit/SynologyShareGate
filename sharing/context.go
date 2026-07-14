@@ -156,8 +156,6 @@ func GetContext(ctx context.Context, client *proxy.Client, logger *middleware.Lo
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	logger.Debug("GetContext1")
-
 	var sidMaxAge int
 	var sidExpires time.Time
 	sharingStatus := ""
@@ -188,8 +186,6 @@ func GetContext(ctx context.Context, client *proxy.Client, logger *middleware.Lo
 		}
 	}
 
-	logger.Debug("GetContext2")
-
 	// We have a SID — call the Session API to get the full share context.
 	params := url.Values{}
 	params.Set("api", "SYNO.Core.Sharing.Session")
@@ -218,8 +214,6 @@ func GetContext(ctx context.Context, client *proxy.Client, logger *middleware.Lo
 	}
 	defer resp.Body.Close()
 
-	logger.Debug("GetContext3")
-
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // 1 MB cap
 	if err != nil {
 		return nil, fmt.Errorf("read context body: %w", err)
@@ -242,8 +236,6 @@ func GetContext(ctx context.Context, client *proxy.Client, logger *middleware.Lo
 		}
 		return nil, fmt.Errorf("parse context: %w", err)
 	}
-
-	logger.Debug("GetContext4")
 
 	// Fallback user check in case HTML parsing failed to detect it.
 	if session.SharingStatus == "user" {
