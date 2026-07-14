@@ -9,48 +9,71 @@ Photos sharing links are created by the Synology Photos app. They differ signifi
 | Browse / view | `/photo/mo/sharing/{passphrase}` | `POST /photo/mo/sharing/webapi/entry.cgi/{API_NAME}` |
 | Upload request | `/photo/mo/request/{passphrase}` | `POST /photo/mo/request/webapi/entry.cgi/{API_NAME}` |
 | Thumbnails | — | `GET /photo/synofoto/api/v2/p/Thumbnail/get` |
-| Download | — | `POST /photo/mo/sharing/webapi/entry.cgi/{filename}.zip` |
+| Download (per item) | — | `POST /photo/mo/sharing/webapi/entry.cgi` (`SYNO.Foto.Download`) |
+| Download (full album) | — | `POST /photo/mo/sharing/webapi/entry.cgi/{filename}.zip` (`SYNO.Foto.Browse.Album`) |
 
-## Common Request Headers (all entry.cgi API calls)
+## Common Request Headers (authenticated API calls)
 
 ```
 Content-Type: application/x-www-form-urlencoded
+Cookie: sharing_sid={value}
 X-Syno-Sharing: {passphrase}
 ```
 
 ---
 
+## Initial Page Parse
+
+All browse flows start with a `GET` to the share landing page. The HTML response embeds a `window.SYNO` object that carries all the context needed before making any API calls:
+
+```
+GET /photo/mo/sharing/{passphrase}
+```
+
+Embedded JavaScript (look for `window.SYNO = {`):
+```javascript
+window.SYNO = {
+  SDS: {
+    Session: {
+      sharing: true,
+      sharing_status: "none",   // "none" | "password"
+      sharing_id: "EWvNhI0J0",  // equals the passphrase
+    },
+  },
+  FotoSharing: {
+    enable_password: false,
+    passphrase: "EWvNhI0J0",
+    privacy_type: "public-download",  // "public-view" | "public-download"
+  },
+};
+```
+
+Key fields:
+
+| Field | Meaning |
+|---|---|
+| `FotoSharing.enable_password` | `true` → show password form before listing photos |
+| `FotoSharing.privacy_type` | `"public-download"` → offer download buttons; `"public-view"` → view only |
+| `SDS.Session.sharing_id` | The passphrase value (use for all subsequent API calls) |
+
+**Invite-only detection:** The landing page issues an HTTP redirect to the DSM login URL (`{nas}:5001/?launchApp=SYNO.Foto.Sharing.AppInstance&...`) instead of returning HTML with `window.SYNO`. Detect by observing a redirect response.
+
+**Upload request detection:** Upload request pages (`/photo/mo/request/{passphrase}`) contain `PhotoRequestPage.init` in their HTML body JavaScript. Browse pages do not. Use this as the authoritative check to distinguish share types at runtime.
+
+Both page types include `window.SYNO`, but the upload page's `FotoSharing` object only has `passphrase` — no `enable_password` or `privacy_type`. The absence of those fields is a secondary signal, but `PhotoRequestPage.init` is more explicit.
+
+**Cookie:** For public browse shares, `Set-Cookie: sharing_sid=...` is included in this response. For password-protected shares, no cookie is set here — it comes from Login. Upload request pages do not use a session cookie.
+
+---
+
 ## Flow 1: Public Browse (no password)
 
-### Step 1 — Get permissions
+### Step 1 — Load landing page
 ```
-POST /photo/mo/sharing/webapi/entry.cgi/SYNO.Foto.Sharing.Passphrase
-
-api=SYNO.Foto.Sharing.Passphrase&method=get_permission&version=1
-  &passphrase="LESyyu3kf"
-  &exclude_public=false
+GET /photo/mo/sharing/{passphrase}
 ```
 
-Response:
-```json
-{
-  "data": {
-    "permission": {
-      "download": false,
-      "manage": false,
-      "own": false,
-      "upload": false,
-      "view": true
-    },
-    "user_id": -1,
-    "username": ""
-  },
-  "success": true
-}
-```
-
-- `download: true` → album was shared with download permission
-- `error.code === 123` → invite-only link; requires DSM login; **not supported**
+Parse `window.SYNO` from the HTML. Confirm `enable_password: false` and note `privacy_type`. The `sharing_sid` cookie is set in this response.
 
 ### Step 2 — Get album info
 ```
@@ -68,31 +91,14 @@ Response (key fields):
     "list": [{
       "id": 38,
       "name": "2026-07-14",
-      "item_count": 3,
-      "start_time": 1254483464,
-      "end_time": 1254483560,
-      "additional": {
-        "sharing_info": {
-          "enable_password": false,
-          "privacy_type": "public-view",
-          "passphrase": "LESyyu3kf",
-          "owner": { "id": 2, "name": "martin" }
-        },
-        "thumbnail": {
-          "cache_key": "448643_1254476266",
-          "unit_id": 448643,
-          "sm": "ready", "m": "ready", "xl": "ready"
-        }
-      }
+      "item_count": 3
     }]
   },
   "success": true
 }
 ```
 
-Key fields:
-- `enable_password: true` → show password form; call Login before proceeding
-- `privacy_type`: `"public-view"` | `"public-download"` (correlates with `permission.download`)
+Provides album name and total item count for pagination.
 
 ### Step 3 — List photos
 ```
@@ -136,16 +142,23 @@ Response:
 
 ## Flow 2: Password-Protected Browse
 
-Steps 1–2 (get_permission + Browse.Album) work **without** auth and reveal `enable_password: true`. Then:
+### Step 1 — Load landing page
+```
+GET /photo/mo/sharing/{passphrase}
+```
 
-### Step 2.5 — Authenticate
+Parse `window.SYNO`. `FotoSharing.enable_password: true` → show the password form. No `sharing_sid` cookie is set here.
+
+### Step 2 — Authenticate
 ```
 POST /photo/mo/sharing/webapi/entry.cgi/SYNO.Core.Sharing.Login
 
 api=SYNO.Core.Sharing.Login&method=login&version=1
-  &sharing_id="YXiEpO1Xy"
-  &password="gh78ut"
+  &sharing_id=YXiEpO1Xy
+  &password=gh78ut
 ```
+
+> **Note:** `sharing_id` and `password` are plain values — not JSON-quoted. (Same quirk as FileStation.)
 
 Response:
 ```json
@@ -155,20 +168,21 @@ Response:
 }
 ```
 
-The `sharing_sid` is set as a browser cookie. **All subsequent requests for this album must include the `sharing_sid` cookie** — Browse.Item returns `error.code 101` without it.
+Store the `sharing_sid` and include it as a cookie on all subsequent requests. `Browse.Item` returns `error.code 101` without it. Error code `1001` = wrong password.
 
-Note: this is the same API as FileStation password-protected shares (`SYNO.Core.Sharing.Login`).
+### Step 3 — Get album info & list photos
+Same as Flow 1 Steps 2–3, now with the `sharing_sid` cookie set.
 
 ---
 
 ## Flow 3: Invite-Only (not supported)
 
-Calling `SYNO.Foto.Sharing.Passphrase.get_permission` returns:
-```json
-{ "error": { "code": 123 }, "success": false }
+The landing page `GET /photo/mo/sharing/{passphrase}` responds with an HTTP redirect to:
+```
+{nas}:5001/?launchApp=SYNO.Foto.Sharing.AppInstance&passphrase={id}&photos_action=login
 ```
 
-The web app redirects to `{nas}:5001/?launchApp=SYNO.Foto.Sharing.AppInstance&passphrase={id}&photos_action=login`. This requires full DSM login and is **not supported**.
+This requires a full DSM account login and is **not supported**. Detect by following the redirect and checking the destination URL, or by treating any non-200 / missing `window.SYNO` response as unsupported.
 
 ---
 
@@ -179,7 +193,14 @@ API base: `POST /photo/mo/request/webapi/entry.cgi/{API_NAME}`.
 
 Upload requests are **always public** — no password or invite-only protection.
 
-### Step 1 — Get request info
+### Step 1 — Load landing page
+```
+GET /photo/mo/request/{passphrase}
+```
+
+The HTML body contains `PhotoRequestPage.init` (a JavaScript call), which is the signal that this is an upload request share rather than a browse share. `window.SYNO` is present but `FotoSharing` only contains `passphrase` — no `enable_password` or `privacy_type`.
+
+### Step 2 — Get request info
 ```
 POST /photo/mo/request/webapi/entry.cgi/SYNO.Foto.Sharing.Passphrase
 
@@ -201,7 +222,7 @@ Response:
 
 `filesize_limit: 0` means no limit.
 
-### Step 2 — Upload photo
+### Step 3 — Upload photo
 ```
 POST /photo/mo/request/webapi/entry.cgi/SYNO.Foto.Upload.PhotoRequestItem
   ?api=SYNO.Foto.Upload.PhotoRequestItem&method=upload&version=1
@@ -260,7 +281,33 @@ GET /photo/synofoto/api/v2/p/Thumbnail/get?id=448643&cache_key="448643_125447626
 
 ---
 
-## Download URL (Album)
+## Download URL (Per Item)
+
+Downloads one or more specific photos by item ID. Single item → original file. Multiple items → ZIP containing just those files.
+
+```
+POST /photo/mo/sharing/webapi/entry.cgi
+
+api=SYNO.Foto.Download&method=download&version=2
+  &force_download=true
+  &item_id=[476428,476429]
+  &passphrase="{passphrase}"
+  &download_type=source
+  &_sharing_id="{passphrase}"
+```
+
+- `item_id` — JSON array of integer photo IDs from `Browse.Item.list`
+- `download_type=source` → original file(s); `download_type=convert` → compressed JPEG
+- `force_download=true` — sets `Content-Disposition: attachment`
+- Single item: returns the original image file directly
+- Multiple items: returns `application/zip`
+- Auth: `X-Syno-Sharing: {passphrase}` header; `sharing_sid` cookie required for password-protected albums
+
+**Used by the native frontend for:** fullscreen viewer downloads (single item) and multi-select downloads (array of selected IDs).
+
+---
+
+## Download URL (Full Album)
 
 Downloads the full album as a ZIP. The `.zip` suffix in the URL is a browser filename hint.
 
@@ -280,7 +327,7 @@ passphrase="{passphrase}"
 - No `X-Syno-Sharing` header; auth is via the `sharing_sid` cookie and/or `_SSID` session
 - Returns: `application/zip` with `Content-Disposition: attachment; filename="{album_name}.zip"`
 
-> **Note:** Download requires a valid session. For public links, the `sharing_sid` cookie appears to be set automatically on page load (mechanism: likely `Set-Cookie` from the initial HTML response). For password-protected links it comes from `SYNO.Core.Sharing.Login`. A CLI implementation needs to capture the session cookie from the initial page request before calling the download endpoint.
+> **Note:** Download requires a valid session. For public links, the `sharing_sid` cookie appears to be set automatically on page load (mechanism: `Set-Cookie` from the initial HTML response). For password-protected links it comes from `SYNO.Core.Sharing.Login`. A third party implementation needs to capture the session cookie from the initial page request, or login before calling the download endpoint.
 
 ---
 
@@ -293,24 +340,35 @@ passphrase="{passphrase}"
 | Upload requests | same URL as browse | separate `/photo/mo/request/` path |
 | Password auth | `SYNO.Core.Sharing.Login` | `SYNO.Core.Sharing.Login` (same) |
 | Thumbnails | not applicable | separate endpoint at `/photo/synofoto/api/v2/p/` |
-| Download | single file or folder as ZIP via `SYNO.FileStation.Download` | album as ZIP via `SYNO.Foto.Browse.Album&method=download` |
-| Invite-only detection | `SYNO.Core.Sharing.Session` `sharing_status` field | `SYNO.Foto.Sharing.Passphrase` error code 123 |
+| Download | single file or folder as ZIP via `SYNO.FileStation.Download` | per-item (1–N photos) via `SYNO.Foto.Download`; full album ZIP via `SYNO.Foto.Browse.Album` |
+| Invite-only detection | `SYNO.Core.Sharing.Session` `sharing_status` field | Redirect from landing page HTML |
 
 ---
 
 ## Minimum API Calls (per use case)
 
 **Browse public album:**
-1. `SYNO.Foto.Sharing.Passphrase.get_permission` — check permissions & detect invite-only
-2. `SYNO.Foto.Browse.Album.get` — get album name, item count, detect password gate
+1. `GET /photo/mo/sharing/{passphrase}` — parse `window.SYNO`; get `sharing_sid` cookie; detect invite-only (redirect) and `privacy_type`
+2. `SYNO.Foto.Browse.Album.get` — get album name and item count
 3. `SYNO.Foto.Browse.Item.list` — list photos (paginate with offset/limit)
-4. Thumbnail/get — fetch thumbnails (no API call needed, direct GET with passphrase params)
+4. `Thumbnail/get` — fetch thumbnails (direct GET with passphrase params, no cookie needed)
 
 **Browse password-protected album:**
-1. `SYNO.Foto.Browse.Album.get` — detect `enable_password: true`
+1. `GET /photo/mo/sharing/{passphrase}` — parse `window.SYNO`; detect `enable_password: true`
 2. `SYNO.Core.Sharing.Login.login` — authenticate, get `sharing_sid` cookie
-3. `SYNO.Foto.Browse.Item.list` — list photos (cookie required)
+3. `SYNO.Foto.Browse.Album.get` — get album name and item count
+4. `SYNO.Foto.Browse.Item.list` — list photos (cookie required)
+
+**Download single photo (from viewer):**
+- `SYNO.Foto.Download.download` — POST with `item_id=[{id}]`; streams original file
+
+**Download selected photos:**
+- `SYNO.Foto.Download.download` — POST with `item_id=[id1,id2,...]`; returns ZIP of selected files
+
+**Download full album:**
+- `SYNO.Foto.Browse.Album.download` — POST to `/{album_name}.zip`; streams all photos as ZIP
 
 **Upload request:**
-1. `SYNO.Foto.Sharing.Passphrase.get_photo_request_info` — get subject/description
-2. `SYNO.Foto.Upload.PhotoRequestItem.upload` — upload each file (with thumbnails)
+1. `GET /photo/mo/request/{passphrase}` — detect `PhotoRequestPage.init` in HTML (confirms upload type)
+2. `SYNO.Foto.Sharing.Passphrase.get_photo_request_info` — get subject/description
+3. `SYNO.Foto.Upload.PhotoRequestItem.upload` — upload each file (with thumbnails)

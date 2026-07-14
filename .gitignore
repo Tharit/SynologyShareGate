@@ -1,3 +1,4 @@
 .vscode
 .claude
 run_dev.sh
+.playwright-mcp
