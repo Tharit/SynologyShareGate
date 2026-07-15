@@ -262,7 +262,8 @@ Multipart fields:
 | `thumb_sm` | client-generated JPEG thumbnail (small) |
 | `thumb_m` | client-generated JPEG thumbnail (medium) |
 
-The client generates the three thumbnails locally before uploading. Whether the server generates them if omitted is not confirmed.
+The client generates the three thumbnails locally before uploading.
+Whether the server generates them if omitted is not confirmed, but assumed - the fields are likely optional.
 
 Response:
 ```json
@@ -296,6 +297,12 @@ GET /photo/synofoto/api/v2/p/Thumbnail/get?id=448643&cache_key="448643_125447626
 ```
 
 Parameters (e.g., cache_key, etc) are supplied by data from SYNO.Foto.Browse.Item endpoint.
+The xl thumbnail is used by the original frontend for the fullscreen image viewer.
+
+Exemplary sizes (varies depending on image aspect ration):
+- XL: 1912 x 1280
+- M: 478 x 320
+- SM: 359 x 240
 
 ---
 
@@ -320,8 +327,6 @@ api=SYNO.Foto.Download&method=download&version=2
 - Single item: returns the original image file directly
 - Multiple items: returns `application/zip`
 - Auth: `X-Syno-Sharing: {passphrase}` header; `sharing_sid` cookie required for password-protected albums
-
-**Used by the native frontend for:** fullscreen viewer downloads (single item) and multi-select downloads (array of selected IDs).
 
 ---
 
