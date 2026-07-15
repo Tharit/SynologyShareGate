@@ -57,7 +57,7 @@ X-Syno-Sharing: {sharing_id}
 SYNO.SDS.Session = {
   "sharing_id": "pKGFcZ6A4",
   "sharing_status": "none",
-  "hostname": "giristation"
+  "hostname": "nas_hostname"
 }
 ;SYNO.SDS.ExtraSession = {
   "filename": "02.10.2009 - Tisch Evaluation",
@@ -68,7 +68,9 @@ SYNO.SDS.Session = {
 ;
 ```
 
-Parse by finding `VARNAME = ` and JSON-decoding the object that follows.
+Parse by finding `VARNAME = ` and JSON-decoding the object that follows. 
+Note: While current DSM version provides variables in JSON compatible quoted format, this could change.. so a more robust implementation should probably also be able to handle unquoted JS objects.
+
 
 Key fields:
 

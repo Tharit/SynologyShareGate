@@ -11,7 +11,7 @@ var browseContextBody = []byte(`SYNO.SDS.Session = {
    "diskless" : false,
    "enable_syno_token" : "no",
    "fullversion" : "1781661654",
-   "hostname" : "giristation",
+   "hostname" : "nas_hostname",
    "isLogined" : false,
    "lang" : "enu",
    "login_background_color" : "#FFFFFF",
@@ -62,7 +62,7 @@ var uploadContextBody = []byte(`SYNO.SDS.Session = {
    "diskless" : false,
    "enable_syno_token" : "no",
    "fullversion" : "1781661654",
-   "hostname" : "giristation",
+   "hostname" : "nas_hostname",
    "isLogined" : false,
    "lang" : "enu",
    "login_background_color" : "#FFFFFF",
@@ -94,7 +94,7 @@ var uploadContextBody = []byte(`SYNO.SDS.Session = {
 ;SYNO.SDS.ExtraSession = {
    "is_sharing_upload" : true,
    "request_info" : "Hello, my friend! Please upload files here.",
-   "request_name" : "jefe",
+   "request_name" : "username",
    "status" : 0
 }
 ;`)
@@ -107,8 +107,8 @@ func TestParseJSContext_Browse(t *testing.T) {
 	if session.SharingID != "pKGFcZ6A4" {
 		t.Errorf("SharingID = %q, want %q", session.SharingID, "pKGFcZ6A4")
 	}
-	if session.Hostname != "giristation" {
-		t.Errorf("Hostname = %q, want %q", session.Hostname, "giristation")
+	if session.Hostname != "nas_hostname" {
+		t.Errorf("Hostname = %q, want %q", session.Hostname, "nas_hostname")
 	}
 	if extra.IsSharingUpload {
 		t.Error("IsSharingUpload should be false for browse share")
@@ -135,8 +135,8 @@ func TestParseJSContext_Upload(t *testing.T) {
 	if !extra.IsSharingUpload {
 		t.Error("IsSharingUpload should be true for upload share")
 	}
-	if extra.RequestName != "jefe" {
-		t.Errorf("RequestName = %q, want %q", extra.RequestName, "jefe")
+	if extra.RequestName != "username" {
+		t.Errorf("RequestName = %q, want %q", extra.RequestName, "username")
 	}
 	if extra.RequestInfo != "Hello, my friend! Please upload files here." {
 		t.Errorf("RequestInfo = %q", extra.RequestInfo)
