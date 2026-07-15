@@ -20,6 +20,14 @@ Cookie: sharing_sid={value}
 X-Syno-Sharing: {passphrase}
 ```
 
+> **The `sharing_sid` cookie is required on every authenticated call, with no
+> exceptions beyond `SYNO.Core.Sharing.Login` itself.** Confirmed against a live NAS:
+> this includes `Thumbnail/get` and `SYNO.Foto.Sharing.Passphrase.get_photo_request_info`,
+> both of which look like they should work from passphrase params alone but return
+> `{"error":{"code":101},"success":false}` ("no parameter of API, method or version" —
+> Synology's generic rejection code) without it. Always send the cookie once you have
+> one, even for calls whose documented/observed query params look self-sufficient.
+
 ---
 
 ## Initial Page Parse
@@ -52,6 +60,38 @@ window.SYNO = {
   },
 };
 ```
+
+> **This is a JavaScript object literal, not JSON.** Confirmed against a live NAS: keys
+> are unquoted, entries have trailing commas, and `SDS` carries sibling fields with
+> inline function literals, e.g.:
+> ```javascript
+> window.SYNO = {
+>   SDS: {
+>     Session: {
+>       sharing: true,
+>       sharing_status: "none",
+>       sharing_id: "ZaAqvUn0f",
+>     },
+>     Desktop: {
+>       doLayout: function () { },
+>     },
+>     Utils: {
+>       Logout: {},
+>     },
+>   },
+>   FotoSharing: {
+>     enable_password: false,
+>     passphrase: "ZaAqvUn0f",
+>     privacy_type: "public-view",
+>   },
+> };
+> ```
+> A plain JSON decoder will fail on the unquoted keys. Don't try to parse the whole
+> `window.SYNO` object — locate the `FotoSharing` sub-object specifically (brace-match
+> from its opening `{` to the matching `}`, honoring quoted strings) and pull
+> `enable_password` / `passphrase` / `privacy_type` out of that substring directly
+> (e.g. with small targeted regexes). `SDS.Session` isn't needed for anything in this
+> proxy's flows and can be ignored entirely.
 
 Key fields:
 
@@ -225,7 +265,12 @@ POST /photo/mo/request/webapi/entry.cgi/SYNO.Foto.Sharing.Passphrase
 
 api=SYNO.Foto.Sharing.Passphrase&method=get_photo_request_info&version=1
   &passphrase="P4MBAbRsi"
+
+Cookie: sharing_sid={value}
 ```
+
+> Requires the `sharing_sid` cookie from Step 1, despite the request looking
+> self-sufficient from `passphrase` alone — omitting it returns `{"error":{"code":101}}`.
 
 Response:
 ```json
@@ -288,15 +333,23 @@ GET /photo/synofoto/api/v2/p/Thumbnail/get
   &size="{size}"
   &passphrase="{passphrase}"
   &_sharing_id="{passphrase}"
+
+Cookie: sharing_sid={value}
 ```
 
 - `size`: `"sm"` | `"m"` | `"xl"`
-- No session cookie required — passphrase params are sufficient
+- **The `sharing_sid` cookie is required.** Confirmed against a live NAS: omitting it
+  (even though the query params alone look sufficient) gets `{"error":{"code":101},"success":false}`
+  ("no parameter of API, method or version" — Synology's generic rejection code, returned
+  here despite api/method/version genuinely being irrelevant to this endpoint's URL style).
+  Synology's own web client always sends the cookie; do the same. No `X-Syno-Sharing`
+  header is sent by the real client for this endpoint.
 - Returns: `image/jpeg`
 
-Example:
+Example (captured from the real frontend, with cookie):
 ```
-GET /photo/synofoto/api/v2/p/Thumbnail/get?id=448643&cache_key="448643_1254476266"&type="unit"&size="sm"&passphrase="LESyyu3kf"&_sharing_id="LESyyu3kf"
+GET /photo/synofoto/api/v2/p/Thumbnail/get?id=448650&cache_key=%22448650_1254476362%22&type=%22unit%22&size=%22xl%22&passphrase=%22EWvNhI0J0%22&_sharing_id=%22EWvNhI0J0%22
+Cookie: sharing_sid={value}
 ```
 
 Parameters (e.g., cache_key, etc) are supplied by data from SYNO.Foto.Browse.Item endpoint.
@@ -330,6 +383,33 @@ api=SYNO.Foto.Download&method=download&version=2
 - Single item: returns the original image file directly
 - Multiple items: returns `application/zip`
 - Auth: `X-Syno-Sharing: {passphrase}` header; `sharing_sid` cookie required for password-protected albums
+
+**Video streaming:** this endpoint also supports byte-range streaming via the
+`Range: bytes=131301376-` request header. It is used by the original frontend in the
+fullscreen photo viewer to play videos directly, by pointing a `<video>` element's
+`src` at a single-item request (`item_id` with one ID) — the browser's media engine
+issues the Range requests itself as it seeks/buffers.
+
+**GET, not POST, for the streaming case.** The original frontend uses POST (as shown
+above) for explicit downloads, but a `<video src>` can only ever be fetched via GET —
+browsers have no mechanism to POST for a media element's source. So when embedding
+this as a video source, the same params go out as a GET with a query string instead:
+
+```
+GET /photo/mo/sharing/webapi/entry.cgi
+  ?api=SYNO.Foto.Download&method=download&version=2
+  &force_download=true
+  &item_id=[476428]
+  &passphrase="{passphrase}"
+  &download_type=source
+  &_sharing_id="{passphrase}"
+
+Range: bytes=131301376-
+Cookie: sharing_sid={value}
+```
+
+Synology responds `206 Partial Content` with `Content-Range`/`Accept-Ranges` headers
+for a satisfiable range, or `416 Range Not Satisfiable` otherwise.
 
 ---
 
@@ -375,7 +455,7 @@ passphrase="{passphrase}"
 1. `GET /photo/mo/sharing/{passphrase}` — parse `window.SYNO`; get `sharing_sid` cookie; detect invite-only (redirect) and `privacy_type`
 2. `SYNO.Foto.Browse.Album.get` — get album name and item count
 3. `SYNO.Foto.Browse.Item.list` — list photos (paginate with offset/limit)
-4. `Thumbnail/get` — fetch thumbnails (direct GET with passphrase params, no cookie needed)
+4. `Thumbnail/get` — fetch thumbnails (direct GET with passphrase params **and** the `sharing_sid` cookie)
 
 **Browse password-protected album:**
 1. `GET /photo/mo/sharing/{passphrase}` — parse `window.SYNO`; detect `enable_password: true`
@@ -386,6 +466,12 @@ passphrase="{passphrase}"
 **Download single photo (from viewer):**
 - `SYNO.Foto.Download.download` — POST with `item_id=[{id}]`; streams original file
 
+**Play video (from viewer):**
+- Same `SYNO.Foto.Download.download` single-item request, with the client's `Range`
+  header forwarded — no separate streaming endpoint exists — but issued as **GET**
+  with query params instead of POST-with-form-body, since that's the only method a
+  `<video src>` can use
+
 **Download selected photos:**
 - `SYNO.Foto.Download.download` — POST with `item_id=[id1,id2,...]`; returns ZIP of selected files
 
@@ -394,5 +480,5 @@ passphrase="{passphrase}"
 
 **Upload request:**
 1. `GET /photo/mo/request/{passphrase}` - get `sharing_sid` cookie
-2. `SYNO.Foto.Sharing.Passphrase.get_photo_request_info` — get subject/description
-3. `SYNO.Foto.Upload.PhotoRequestItem.upload` — upload each file (with thumbnails)
+2. `SYNO.Foto.Sharing.Passphrase.get_photo_request_info` — get subject/description (cookie required)
+3. `SYNO.Foto.Upload.PhotoRequestItem.upload` — upload each file (with thumbnails; cookie required)

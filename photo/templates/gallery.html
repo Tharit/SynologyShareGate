@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <link rel="icon" href="data:,">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Photo Gallery</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      font-size: 15px;
+      line-height: 1.6;
+      color: #111;
+      background: #f7f7f7;
+      margin: 0;
+      padding: 0;
+    }
+    header {
+      background: #fff;
+      border-bottom: 1px solid #ebebeb;
+      padding: 0.875rem 2rem;
+    }
+    header h1 { margin: 0; font-size: 1rem; font-weight: 600; color: #111; letter-spacing: -0.01em; display: flex; align-items: center; gap: 0.5rem; }
+    main { max-width: 1100px; margin: 0 auto; padding: 2rem 1.5rem; }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.5rem 0.75rem;
+      margin-bottom: 1rem;
+    }
+    .album-title { font-weight: 600; font-size: 1rem; color: #111; }
+    .album-count { color: #999; font-size: 0.85rem; margin-left: 0.4rem; }
+    .btn-dl {
+      flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3em;
+      padding: 0.3rem 0.8rem;
+      font-size: 0.8125rem;
+      font-weight: 500;
+      color: #0066cc;
+      background: transparent;
+      border: 1px solid #d0d8e8;
+      border-radius: 6px;
+      text-decoration: none;
+      white-space: nowrap;
+      line-height: 1.6;
+      cursor: pointer;
+    }
+    .btn-dl:hover { background: #f0f6ff; border-color: #b8ccdf; }
+    .btn-dl-all { margin-left: auto; }
+    #selection-bar {
+      display: none;
+      align-items: center;
+      gap: 0.5rem 1rem;
+      background: #eef4ff;
+      border: 1px solid #cfe0f7;
+      border-radius: 8px;
+      padding: 0.6rem 1rem;
+      margin-bottom: 1rem;
+      font-size: 0.875rem;
+      color: #333;
+      flex-wrap: wrap;
+    }
+    #selection-bar.active { display: flex; }
+    #selection-bar .spacer { flex: 1; }
+    #selection-bar button {
+      color: #0066cc;
+      background: none;
+      border: none;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 0.875rem;
+      padding: 0.2rem 0;
+    }
+    #selection-count { font-weight: 600; }
+    #photo-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 4px;
+    }
+    .thumb {
+      position: relative;
+      aspect-ratio: 1 / 1;
+      overflow: hidden;
+      border-radius: 6px;
+      background: #e8e8e8;
+      cursor: pointer;
+    }
+    .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .thumb .check {
+      position: absolute;
+      top: 6px;
+      left: 6px;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      border: 2px solid #fff;
+      background: rgba(0,0,0,0.35);
+      opacity: 0;
+      transition: opacity .12s, background .12s, border-color .12s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .thumb:hover .check, .thumb.selected .check { opacity: 1; }
+    .thumb.selected .check { background: #0066cc; border-color: #0066cc; }
+    .thumb.selected .check::after { content: '\2713'; color: #fff; font-size: 13px; font-weight: 700; }
+    .thumb.selected::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border: 3px solid #0066cc;
+      border-radius: 6px;
+      pointer-events: none;
+    }
+    .thumb.video::before {
+      content: '\25B6';
+      position: absolute;
+      bottom: 6px;
+      right: 6px;
+      color: #fff;
+      background: rgba(0,0,0,0.5);
+      border-radius: 50%;
+      width: 22px;
+      height: 22px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.7rem;
+      pointer-events: none;
+    }
+    .no-download .check, .no-download #selection-bar, .no-download .btn-dl-all { display: none !important; }
+    #grid-status {
+      padding: 3rem 1rem;
+      text-align: center;
+      color: #bbb;
+      font-size: 0.9rem;
+    }
+    .error-box {
+      background: #fff8f8;
+      border: 1px solid #f0cece;
+      border-radius: 8px;
+      padding: 2rem 1.5rem;
+      text-align: center;
+      color: #c00;
+    }
+    .error-box h2 { margin: 0 0 0.5rem; font-size: 1.05rem; }
+    .error-box p { margin: 0; color: #666; font-size: 0.875rem; }
+    .password-wrap {
+      display: flex;
+      justify-content: center;
+      padding: 4rem 1rem;
+    }
+    .password-card {
+      background: #fff;
+      box-shadow: 0 2px 20px rgba(0,0,0,0.08), 0 0 0 1px rgba(0,0,0,0.04);
+      border-radius: 10px;
+      padding: 2.25rem 2.5rem;
+      width: 100%;
+      max-width: 360px;
+      text-align: center;
+    }
+    .password-card h2 {
+      margin: 0 0 0.4rem;
+      font-size: 1.05rem;
+      font-weight: 600;
+      color: #111;
+      letter-spacing: -0.01em;
+    }
+    .password-card p {
+      margin: 0 0 1.5rem;
+      color: #777;
+      font-size: 0.875rem;
+      line-height: 1.5;
+    }
+    .password-card input[type="password"] {
+      width: 100%;
+      padding: 0.6rem 0.875rem;
+      font-size: 0.9375rem;
+      border: 1px solid #e0e0e0;
+      border-radius: 6px;
+      outline: none;
+      margin-bottom: 0.75rem;
+      transition: border-color 0.15s;
+    }
+    .password-card input[type="password"]:focus { border-color: #0066cc; box-shadow: 0 0 0 3px rgba(0,102,204,0.12); }
+    .password-card button {
+      width: 100%;
+      padding: 0.65rem 1rem;
+      font-size: 0.9375rem;
+      font-weight: 600;
+      color: #fff;
+      background: #0066cc;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .password-card button:hover { background: #0055aa; }
+    .password-card button:disabled { background: #a0c0e8; cursor: default; }
+    .password-error {
+      margin-top: 0.75rem;
+      font-size: 0.85rem;
+      color: #cc3333;
+    }
+    #viewer {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.92);
+      z-index: 1000;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+    }
+    #viewer.open { display: flex; }
+    #viewer-media { position: relative; display: flex; align-items: center; justify-content: center; }
+    #viewer-media img,
+    #viewer-media video { max-width: 92vw; max-height: 82vh; object-fit: contain; user-select: none; }
+    #viewer-media img.hidden { display: none; }
+    #viewer-media video { display: none; }
+    #viewer-media video.active { display: block; }
+    .play-btn {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 4.5rem;
+      height: 4.5rem;
+      border-radius: 50%;
+      background: rgba(0,0,0,0.55);
+      border: 2px solid rgba(255,255,255,0.85);
+      color: #fff;
+      font-size: 1.75rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding-left: 0.3rem;
+    }
+    .play-btn:hover { background: rgba(0,0,0,0.75); }
+    .play-btn.hidden { display: none; }
+    #viewer .top-bar {
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1rem 1.25rem;
+      color: #fff;
+      font-size: 0.875rem;
+    }
+    #viewer .icon-btn {
+      background: none;
+      border: none;
+      color: #fff;
+      font-size: 1.35rem;
+      cursor: pointer;
+      padding: 0.25rem 0.5rem;
+      line-height: 1;
+      text-decoration: none;
+    }
+    #viewer .icon-btn:hover { opacity: 0.75; }
+    #viewer .nav-btn {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      background: rgba(255,255,255,0.1);
+      border: none;
+      color: #fff;
+      font-size: 1.75rem;
+      width: 3rem;
+      height: 3rem;
+      border-radius: 50%;
+      cursor: pointer;
+    }
+    #viewer .nav-btn:hover { background: rgba(255,255,255,0.2); }
+    #viewer .nav-prev { left: 1rem; }
+    #viewer .nav-next { right: 1rem; }
+    @media (max-width: 600px) {
+      header { padding: 0.875rem 1rem; }
+      main { padding: 1.5rem 1rem; }
+      #photo-grid { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
+      #viewer .nav-btn { width: 2.25rem; height: 2.25rem; font-size: 1.35rem; }
+    }
+  </style>
+</head>
+<body>
+<header>
+  <h1><svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style="flex-shrink:0"><circle cx="15.5" cy="4" r="2.5" fill="#0066cc"/><circle cx="4.5" cy="10" r="2.5" fill="#0066cc"/><circle cx="15.5" cy="16" r="2.5" fill="#0066cc"/><line x1="6.8" y1="8.9" x2="13.2" y2="5.1" stroke="#0066cc" stroke-width="1.5" stroke-linecap="round"/><line x1="6.8" y1="11.1" x2="13.2" y2="14.9" stroke="#0066cc" stroke-width="1.5" stroke-linecap="round"/></svg>Photo Gallery</h1>
+</header>
+<main>
+  {{if .Error}}
+  <div class="error-box">
+    <h2>{{.Error.Title}}</h2>
+    <p>{{.Error.Detail}}</p>
+  </div>
+  {{else}}
+  <div id="password-section"{{if not .IsPasswordProtected}} style="display:none"{{end}}>
+    <div class="password-wrap">
+      <div class="password-card">
+        <h2>Password Required</h2>
+        <p>This share is password-protected. Enter the password to continue.</p>
+        <input type="password" id="share-password" placeholder="Password" autocomplete="current-password"{{if .IsPasswordProtected}} autofocus{{end}}>
+        <button id="unlock-btn">Unlock</button>
+        <p id="password-error" class="password-error" hidden></p>
+      </div>
+    </div>
+  </div>
+  <div id="gallery-section" class="{{if not .CanDownload}}no-download{{end}}"{{if .IsPasswordProtected}} style="display:none"{{end}}>
+    <div class="toolbar">
+      <span class="album-title" id="album-title">{{.AlbumName}}</span>
+      <span class="album-count" id="album-count">{{if .ItemCount}}{{.ItemCount}} items{{end}}</span>
+      <a id="dl-all-btn" href="#" class="btn-dl btn-dl-all">&#8595; Download All</a>
+    </div>
+    <div id="selection-bar">
+      <span id="selection-count">0 selected</span>
+      <span class="spacer"></span>
+      <a id="dl-selected-btn" href="#" class="btn-dl">Download selected</a>
+      <button id="clear-selection-btn" type="button">Clear</button>
+    </div>
+    <div id="photo-grid"></div>
+    <div id="grid-status">Loading&hellip;</div>
+    <div id="sentinel"></div>
+  </div>
+  {{end}}
+</main>
+
+<div id="viewer">
+  <div class="top-bar">
+    <span id="viewer-counter"></span>
+    <span>
+      <a id="viewer-dl-btn" href="#" class="icon-btn" title="Download" download>&#8595;</a>
+      <button id="viewer-close-btn" type="button" class="icon-btn" title="Close">&times;</button>
+    </span>
+  </div>
+  <button id="viewer-prev-btn" type="button" class="nav-btn nav-prev" title="Previous" aria-label="Previous">&#8249;</button>
+  <div id="viewer-media">
+    <img id="viewer-img" alt="">
+    <video id="viewer-video" controls playsinline></video>
+    <button id="viewer-play-btn" type="button" class="play-btn" aria-label="Play video">&#9658;</button>
+  </div>
+  <button id="viewer-next-btn" type="button" class="nav-btn nav-next" title="Next" aria-label="Next">&#8250;</button>
+</div>
+
+{{if not .Error}}
+<script>
+(function () {
+  'use strict';
+
+  var sharingID   = {{.SharingID | js}};
+  var canDownload = {{.CanDownload}};
+
+  var passwordSection  = document.getElementById('password-section');
+  var gallerySection   = document.getElementById('gallery-section');
+  var albumTitleEl      = document.getElementById('album-title');
+  var albumCountEl      = document.getElementById('album-count');
+  var dlAllBtn           = document.getElementById('dl-all-btn');
+  var grid               = document.getElementById('photo-grid');
+  var gridStatus         = document.getElementById('grid-status');
+  var sentinel            = document.getElementById('sentinel');
+  var selectionBar        = document.getElementById('selection-bar');
+  var selectionCount      = document.getElementById('selection-count');
+  var dlSelectedBtn       = document.getElementById('dl-selected-btn');
+  var clearSelectionBtn   = document.getElementById('clear-selection-btn');
+
+  var viewer          = document.getElementById('viewer');
+  var viewerImg        = document.getElementById('viewer-img');
+  var viewerVideo       = document.getElementById('viewer-video');
+  var viewerPlayBtn     = document.getElementById('viewer-play-btn');
+  var viewerCounter     = document.getElementById('viewer-counter');
+  var viewerDlBtn       = document.getElementById('viewer-dl-btn');
+  var viewerPrevBtn     = document.getElementById('viewer-prev-btn');
+  var viewerNextBtn     = document.getElementById('viewer-next-btn');
+  var viewerCloseBtn    = document.getElementById('viewer-close-btn');
+
+  var items = [];
+  var selected = {}; // id -> true
+  var offset = 0;
+  var limit = 100;
+  var loading = false;
+  var done = false;
+  var viewerIndex = -1;
+
+  // ── Password unlock ────────────────────────────────────────────────────────
+
+  var input = document.getElementById('share-password');
+  var unlockBtn = document.getElementById('unlock-btn');
+  var errEl = document.getElementById('password-error');
+
+  function showPasswordError(msg) {
+    errEl.textContent = msg;
+    errEl.hidden = false;
+  }
+
+  function doUnlock() {
+    var password = input.value;
+    if (!password) { input.focus(); return; }
+
+    unlockBtn.disabled = true;
+    errEl.hidden = true;
+
+    fetch('/api/photo/unlock', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: sharingID, password: password })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.success) {
+          if (data.albumName) albumTitleEl.textContent = data.albumName;
+          if (typeof data.itemCount === 'number') {
+            albumCountEl.textContent = data.itemCount + (data.itemCount === 1 ? ' item' : ' items');
+          }
+          passwordSection.style.display = 'none';
+          gallerySection.style.display = '';
+          loadNextPage();
+        } else {
+          showPasswordError(data.error || 'Unlock failed.');
+          unlockBtn.disabled = false;
+          input.select();
+        }
+      })
+      .catch(function () {
+        showPasswordError('Network error — could not reach the server.');
+        unlockBtn.disabled = false;
+      });
+  }
+
+  if (unlockBtn) {
+    unlockBtn.addEventListener('click', doUnlock);
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { doUnlock(); }
+    });
+  }
+
+  // ── Thumbnail / download URLs ────────────────────────────────────────────────
+
+  function thumbURL(item, size) {
+    return '/api/photo/thumbnail'
+      + '?id=' + encodeURIComponent(sharingID)
+      + '&unit=' + encodeURIComponent(item.thumbUnitId)
+      + '&cache_key=' + encodeURIComponent(item.thumbCacheKey)
+      + '&size=' + size;
+  }
+
+  function downloadURL(itemIDs, nameHint) {
+    var url = '/api/photo/download?id=' + encodeURIComponent(sharingID);
+    for (var i = 0; i < itemIDs.length; i++) {
+      url += '&item_id=' + encodeURIComponent(itemIDs[i]);
+    }
+    if (itemIDs.length === 1 && nameHint) {
+      url += '&name=' + encodeURIComponent(nameHint);
+    }
+    return url;
+  }
+
+  if (dlAllBtn) {
+    dlAllBtn.href = '/api/photo/download-album?id=' + encodeURIComponent(sharingID);
+  }
+
+  // ── Grid rendering ────────────────────────────────────────────────────────────
+
+  function renderItem(item, index) {
+    var div = document.createElement('div');
+    div.className = 'thumb' + (item.isVideo ? ' video' : '');
+
+    var img = document.createElement('img');
+    img.loading = 'lazy';
+    img.src = thumbURL(item, 'sm');
+    img.alt = item.filename || '';
+    div.appendChild(img);
+
+    var check = document.createElement('span');
+    check.className = 'check';
+    check.addEventListener('click', function (e) {
+      e.stopPropagation();
+      toggleSelect(item.id, div);
+    });
+    div.appendChild(check);
+
+    div.addEventListener('click', function () {
+      openViewer(index);
+    });
+
+    grid.appendChild(div);
+  }
+
+  function toggleSelect(id, el) {
+    if (selected[id]) {
+      delete selected[id];
+      el.classList.remove('selected');
+    } else {
+      selected[id] = true;
+      el.classList.add('selected');
+    }
+    updateSelectionBar();
+  }
+
+  function itemByID(id) {
+    for (var i = 0; i < items.length; i++) {
+      if (String(items[i].id) === String(id)) return items[i];
+    }
+    return null;
+  }
+
+  function updateSelectionBar() {
+    var ids = Object.keys(selected);
+    if (ids.length === 0) {
+      selectionBar.classList.remove('active');
+      return;
+    }
+    selectionBar.classList.add('active');
+    selectionCount.textContent = ids.length + (ids.length === 1 ? ' selected' : ' selected');
+    var nameHint = null;
+    if (ids.length === 1) {
+      var it = itemByID(ids[0]);
+      nameHint = it ? it.filename : null;
+    }
+    dlSelectedBtn.href = downloadURL(ids, nameHint);
+  }
+
+  if (clearSelectionBtn) {
+    clearSelectionBtn.addEventListener('click', function () {
+      var thumbs = grid.querySelectorAll('.thumb.selected');
+      for (var i = 0; i < thumbs.length; i++) thumbs[i].classList.remove('selected');
+      selected = {};
+      updateSelectionBar();
+    });
+  }
+
+  // ── Pagination / infinite scroll ───────────────────────────────────────────────
+
+  function loadNextPage() {
+    if (loading || done) return;
+    loading = true;
+    gridStatus.style.display = '';
+    gridStatus.textContent = 'Loading…';
+
+    var url = '/api/photo/list'
+      + '?id=' + encodeURIComponent(sharingID)
+      + '&offset=' + offset
+      + '&limit=' + limit;
+
+    fetch(url)
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        loading = false;
+        if (!data.success) {
+          gridStatus.textContent = data.error || 'Failed to load photos.';
+          done = true;
+          return;
+        }
+        var newItems = data.items || [];
+        var startIndex = items.length;
+        for (var i = 0; i < newItems.length; i++) {
+          items.push(newItems[i]);
+          renderItem(newItems[i], startIndex + i);
+        }
+        offset += newItems.length;
+
+        if (newItems.length < limit) {
+          done = true;
+        }
+        if (items.length === 0) {
+          gridStatus.textContent = 'This album is empty.';
+        } else {
+          gridStatus.style.display = 'none';
+        }
+      })
+      .catch(function () {
+        loading = false;
+        gridStatus.textContent = 'Network error — could not reach the server.';
+      });
+  }
+
+  if ('IntersectionObserver' in window) {
+    var observer = new IntersectionObserver(function (entries) {
+      if (entries[0].isIntersecting) loadNextPage();
+    }, { rootMargin: '400px' });
+    observer.observe(sentinel);
+  } else {
+    window.addEventListener('scroll', function () {
+      if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 600) {
+        loadNextPage();
+      }
+    });
+  }
+
+  // ── Fullscreen viewer ────────────────────────────────────────────────────────
+
+  function openViewer(index) {
+    viewerIndex = index;
+    showViewerItem();
+    viewer.classList.add('open');
+  }
+
+  function closeViewer() {
+    viewer.classList.remove('open');
+    viewerIndex = -1;
+    stopVideo();
+  }
+
+  // stopVideo resets any active video playback and hides the <video> element,
+  // returning the viewer to its thumbnail-plus-play-button state. Called whenever
+  // the viewer navigates to a different item or closes, so playback never continues
+  // in the background.
+  function stopVideo() {
+    viewerVideo.pause();
+    viewerVideo.removeAttribute('src');
+    viewerVideo.load();
+    viewerVideo.classList.remove('active');
+    viewerImg.classList.remove('hidden');
+  }
+
+  function showViewerItem() {
+    var item = items[viewerIndex];
+    if (!item) return;
+    stopVideo();
+
+    // Videos show their thumbnail with a play-button overlay first; the original
+    // file (streamed via Range requests) only loads once the user clicks play.
+    viewerImg.src = thumbURL(item, 'xl');
+    viewerImg.alt = item.filename || '';
+    viewerPlayBtn.classList.toggle('hidden', !item.isVideo);
+    viewerCounter.textContent = (viewerIndex + 1) + ' / ' + items.length;
+    if (canDownload) {
+      viewerDlBtn.href = downloadURL([item.id], item.filename);
+      viewerDlBtn.style.display = '';
+    } else {
+      viewerDlBtn.style.display = 'none';
+    }
+  }
+
+  viewerPlayBtn.addEventListener('click', function () {
+    var item = items[viewerIndex];
+    if (!item) return;
+    viewerVideo.src = downloadURL([item.id], item.filename);
+    viewerImg.classList.add('hidden');
+    viewerPlayBtn.classList.add('hidden');
+    viewerVideo.classList.add('active');
+    viewerVideo.play();
+  });
+
+  function viewerNext() {
+    if (viewerIndex < items.length - 1) {
+      viewerIndex++;
+      showViewerItem();
+    } else if (!done) {
+      loadNextPage();
+    }
+  }
+
+  function viewerPrev() {
+    if (viewerIndex > 0) {
+      viewerIndex--;
+      showViewerItem();
+    }
+  }
+
+  viewerNextBtn.addEventListener('click', viewerNext);
+  viewerPrevBtn.addEventListener('click', viewerPrev);
+  viewerCloseBtn.addEventListener('click', closeViewer);
+  viewer.addEventListener('click', function (e) {
+    if (e.target === viewer) closeViewer();
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (!viewer.classList.contains('open')) return;
+    if (e.key === 'ArrowRight') viewerNext();
+    else if (e.key === 'ArrowLeft') viewerPrev();
+    else if (e.key === 'Escape') closeViewer();
+  });
+
+  var touchStartX = null;
+  viewer.addEventListener('touchstart', function (e) {
+    touchStartX = e.changedTouches[0].clientX;
+  });
+  viewer.addEventListener('touchend', function (e) {
+    if (touchStartX === null) return;
+    var dx = e.changedTouches[0].clientX - touchStartX;
+    if (Math.abs(dx) > 50) {
+      if (dx < 0) { viewerNext(); } else { viewerPrev(); }
+    }
+    touchStartX = null;
+  });
+
+  // Start loading immediately for non-password shares.
+  if (gallerySection.style.display !== 'none') {
+    loadNextPage();
+  }
+})();
+</script>
+{{end}}
+</body>
+</html>

@@ -16,7 +16,9 @@ Synology's native sharing portal (`/sharing/`, `/webman/`) cannot be cleanly iso
 |---|---|
 | `/sharing/{id}` | ✅ Implemented (browse + upload) |
 | `/api/sharing/*` | ✅ Implemented (list, download, upload JSON API) |
-| `/photo/*` | 🔜 Planned (v2) |
+| `/photo/mo/sharing/{id}` | ✅ Implemented (thumbnail grid + fullscreen viewer) |
+| `/photo/mo/request/{id}` | ✅ Implemented (photo/video upload requests) |
+| `/api/photo/*` | ✅ Implemented (list, thumbnail, download, upload JSON API) |
 | `/drive/*` | 🔜 Planned (v2) |
 
 ## Deployment
@@ -69,20 +71,20 @@ TLS termination is expected to be handled by a reverse proxy in front of syno-pr
 
 ## Adding a New Service Backend (Extension Pattern)
 
-New service backends follow the same structure as the `sharing` package:
+New service backends follow the same structure as the `sharing` and `photo` packages:
 
-1. **Create a package** under the service name, e.g. `photo/`.
+1. **Create a package** under the service name, e.g. `drive/`.
 2. **Implement a `Handler`** struct with the proxy client injected via `NewHandler`.
-3. **Write `syno.go`** for the service-specific Synology API calls (following the `sharing/syno.go` pattern).
+3. **Write `syno.go`** for the service-specific Synology API calls (following the `sharing/syno.go` / `photo/syno.go` pattern).
 4. **Add templates** under `<service>/templates/` and embed them with `//go:embed`.
 5. **Register routes** in `main.go` — page routes under `/<service>/{id}`, JSON API routes under `/api/<service>/`:
    ```go
-   ph := photo.NewHandler(client, logger)
-   mux.Handle("GET /photo/{id}", timeout(ph.Browse))
-   mux.Handle("GET /api/photo/list", timeout(ph.APIList))
-   mux.HandleFunc("GET /api/photo/download", ph.APIDownload)  // no timeout — streams
+   dh := drive.NewHandler(client, logger)
+   mux.Handle("GET /drive/{id}", timeout(dh.Browse))
+   mux.Handle("GET /api/drive/list", timeout(dh.APIList))
+   mux.HandleFunc("GET /api/drive/download", dh.APIDownload)  // no timeout — streams
    ```
-6. **Remove the stubs** from `photo/handler.go`.
+6. **Remove the stubs** from `drive/handler.go`.
 
 Key invariants to maintain in any new backend:
 - Never log sharing IDs, file paths, or user-supplied values at INFO level
@@ -99,8 +101,13 @@ Request
             ├─ GET  /api/sharing/list      → sharing.Handler.APIList   (reads sid cookie)
             ├─ GET  /api/sharing/download  → sharing.Handler.APIDownload (streams; no timeout)
             ├─ POST /api/sharing/upload    → sharing.Handler.APIUpload   (streams; no timeout)
-            ├─ GET  /photo/{id}            → 501 stub
-            ├─ *    /api/photo/*           → 501 stub
+            ├─ GET  /photo/mo/sharing/{id} → photo.Handler.BrowsePage    (sets sid cookie)
+            ├─ GET  /photo/mo/request/{id} → photo.Handler.RequestPage  (sets sid cookie)
+            ├─ GET  /api/photo/list        → photo.Handler.APIList        (reads sid cookie)
+            ├─ GET  /api/photo/thumbnail   → photo.Handler.APIThumbnail   (no cookie needed)
+            ├─ GET  /api/photo/download    → photo.Handler.APIDownload    (streams; no timeout)
+            ├─ GET  /api/photo/download-album → photo.Handler.APIDownloadAlbum (streams; no timeout)
+            ├─ POST /api/photo/upload      → photo.Handler.APIUpload      (streams; no timeout)
             ├─ GET  /drive/{id}            → 501 stub
             └─ *    /api/drive/*           → 501 stub
                                                 │
@@ -112,3 +119,5 @@ Request
 ```
 
 `/sharing/{id}` fetches the sharing context from Synology and stores the resulting `sharing_sid` as a session cookie. Subsequent API calls (`/api/sharing/*`) read that cookie — no credentials are ever passed through the browser or stored on the proxy.
+
+`/photo/mo/sharing/{id}` and `/photo/mo/request/{id}` mirror Synology's own two Photos URL namespaces (browse vs. upload request) and work the same way: the landing page establishes a `sharing_sid` session cookie, and `/api/photo/*` reads it on every call. Unlike FileStation shares, Photos API calls are scoped entirely by passphrase (not by folder path), so there's no path-traversal handling needed in this backend.

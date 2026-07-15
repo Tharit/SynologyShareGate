@@ -125,6 +125,7 @@ func main() {
 	mux := http.NewServeMux()
 
 	sh := sharing.NewHandler(client, logger, cfg.MaxUploadBytes, cfg.DevMode)
+	ph := photo.NewHandler(client, logger, cfg.MaxUploadBytes, cfg.DevMode)
 
 	// handlerTimeout covers the full round-trip for non-streaming routes:
 	// Synology context fetch (≤30 s) + API call (≤15 s) + response write.
@@ -135,17 +136,23 @@ func main() {
 
 	// Non-streaming handlers get a response deadline via TimeoutHandler.
 	mux.Handle("GET /sharing/{id}", wrap(sh.Browse))
-	mux.Handle("GET /photo/{id}", wrap(photo.HandlePage))
+	mux.Handle("GET /photo/mo/sharing/{id}", wrap(ph.BrowsePage))
+	mux.Handle("GET /photo/mo/request/{id}", wrap(ph.RequestPage))
 	mux.Handle("GET /drive/{id}", wrap(drive.HandlePage))
 	mux.Handle("GET /api/sharing/list", wrap(sh.APIList))
 	mux.Handle("POST /api/sharing/unlock", wrap(sh.APIUnlock))
-	mux.Handle("GET /api/photo/", wrap(photo.HandleAPI))
+	mux.Handle("GET /api/photo/list", wrap(ph.APIList))
+	mux.Handle("POST /api/photo/unlock", wrap(ph.APIUnlock))
+	mux.Handle("GET /api/photo/thumbnail", wrap(ph.APIThumbnail))
 	mux.Handle("GET /api/drive/", wrap(drive.HandleAPI))
 
 	// Streaming handlers must not have a response deadline.
 	mux.HandleFunc("GET /api/sharing/download", sh.APIDownload)
 	mux.HandleFunc("GET /api/sharing/download-folder", sh.APIDownloadFolder)
 	mux.HandleFunc("POST /api/sharing/upload", sh.APIUpload)
+	mux.HandleFunc("GET /api/photo/download", ph.APIDownload)
+	mux.HandleFunc("GET /api/photo/download-album", ph.APIDownloadAlbum)
+	mux.HandleFunc("POST /api/photo/upload", ph.APIUpload)
 
 	// Middleware chain (outermost first):
 	// Logger → SecurityHeaders → RateLimit → GlobalConcurrency → mux
