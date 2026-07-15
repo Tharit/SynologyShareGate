@@ -26,8 +26,13 @@ X-Syno-Sharing: {passphrase}
 
 All browse flows start with a `GET` to the share landing page. The HTML response embeds a `window.SYNO` object that carries all the context needed before making any API calls:
 
+For Browsing:
 ```
 GET /photo/mo/sharing/{passphrase}
+```
+Or for Upload Requests:
+```
+GET /photo/mo/request/{passphrase}
 ```
 
 Embedded JavaScript (look for `window.SYNO = {`):
@@ -58,11 +63,9 @@ Key fields:
 
 **Invite-only detection:** The landing page issues an HTTP redirect to the DSM login URL (`{nas}:5001/?launchApp=SYNO.Foto.Sharing.AppInstance&...`) instead of returning HTML with `window.SYNO`. Detect by observing a redirect response.
 
-**Upload request detection:** Upload request pages (`/photo/mo/request/{passphrase}`) contain `PhotoRequestPage.init` in their HTML body JavaScript. Browse pages do not. Use this as the authoritative check to distinguish share types at runtime.
+Both upload and browse pages include `window.SYNO`, but the upload page's `FotoSharing` object only has `passphrase` — no `enable_password` or `privacy_type`. 
 
-Both page types include `window.SYNO`, but the upload page's `FotoSharing` object only has `passphrase` — no `enable_password` or `privacy_type`. The absence of those fields is a secondary signal, but `PhotoRequestPage.init` is more explicit.
-
-**Cookie:** For public browse shares, `Set-Cookie: sharing_sid=...` is included in this response. For password-protected shares, no cookie is set here — it comes from Login. Upload request pages do not use a session cookie.
+**Cookie:** For public browse shares and upload requests, `Set-Cookie: sharing_sid=...` is included in this response. For password-protected browse shares, no cookie is set here — it comes from Login.
 
 ---
 
@@ -390,6 +393,6 @@ passphrase="{passphrase}"
 - `SYNO.Foto.Browse.Album.download` — POST to `/{album_name}.zip`; streams all photos as ZIP
 
 **Upload request:**
-1. `GET /photo/mo/request/{passphrase}` — detect `PhotoRequestPage.init` in HTML (confirms upload type)
+1. `GET /photo/mo/request/{passphrase}` - get `sharing_sid` cookie
 2. `SYNO.Foto.Sharing.Passphrase.get_photo_request_info` — get subject/description
 3. `SYNO.Foto.Upload.PhotoRequestItem.upload` — upload each file (with thumbnails)
