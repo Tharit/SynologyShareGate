@@ -1,5 +1,4 @@
 # Functionality extensions
-- Implement /photo Synology Photo shares
 - Implement /drive Synology Drive shares
 
 # Improvements
