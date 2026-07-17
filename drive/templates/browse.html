@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <link rel="icon" href="data:,">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Download Files</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      font-size: 15px;
+      line-height: 1.6;
+      color: #111;
+      background: #f7f7f7;
+      margin: 0;
+      padding: 0;
+    }
+    header {
+      background: #fff;
+      border-bottom: 1px solid #ebebeb;
+      padding: 0.875rem 2rem;
+    }
+    header h1 { margin: 0; font-size: 1rem; font-weight: 600; color: #111; letter-spacing: -0.01em; display: flex; align-items: center; gap: 0.5rem; }
+    main { max-width: 960px; margin: 0 auto; padding: 2rem 1.5rem; }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.5rem 0.75rem;
+      margin-bottom: 1.5rem;
+    }
+    nav.breadcrumb {
+      font-size: 0.875rem;
+      color: #666;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.25rem;
+      min-height: 1.5rem;
+      flex: 1;
+    }
+    nav.breadcrumb a { color: #0066cc; text-decoration: none; }
+    nav.breadcrumb a:hover { text-decoration: underline; }
+    nav.breadcrumb .sep { color: #d4d4d4; margin: 0 0.1rem; }
+    nav.breadcrumb .current { color: #444; }
+    .btn-dl-zip {
+      flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3em;
+      padding: 0.3rem 0.8rem;
+      font-size: 0.8125rem;
+      font-weight: 500;
+      color: #0066cc;
+      background: transparent;
+      border: 1px solid #d0d8e8;
+      border-radius: 6px;
+      text-decoration: none;
+      white-space: nowrap;
+      line-height: 1.6;
+    }
+    .btn-dl-zip:hover { background: #f0f6ff; border-color: #b8ccdf; }
+    #selection-bar {
+      display: none;
+      align-items: center;
+      gap: 0.75rem;
+      background: #eef4ff;
+      border: 1px solid #cfe0f7;
+      border-radius: 8px;
+      padding: 0.55rem 0.9rem;
+      margin-bottom: 1rem;
+      font-size: 0.85rem;
+      color: #333;
+    }
+    #selection-bar.active { display: flex; }
+    #selection-bar .spacer { flex: 1; }
+    #selection-bar button {
+      border: 1px solid #d0d8e8;
+      background: #fff;
+      color: #444;
+      border-radius: 6px;
+      padding: 0.3rem 0.7rem;
+      font-size: 0.8125rem;
+      cursor: pointer;
+    }
+    #selection-bar button:hover { background: #f5f5f5; }
+    #selection-count { font-weight: 600; }
+    .file-table-wrap {
+      background: #fff;
+      border: 1px solid #e8e8e8;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+    }
+    table { width: 100%; border-collapse: collapse; }
+    thead tr { border-bottom: 1px solid #ebebeb; }
+    th {
+      text-align: left;
+      padding: 0.65rem 1rem;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #999;
+    }
+    th.check-col, td.check-col { width: 2rem; padding-right: 0; }
+    td { padding: 0.7rem 1rem; border-bottom: 1px solid #f2f2f2; vertical-align: middle; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #f8f9ff; }
+    td.name a { color: #0066cc; text-decoration: none; font-weight: 500; }
+    td.name a:hover { text-decoration: underline; }
+    td.name .icon { display: inline-block; width: 1.1em; margin-right: 0.4em; text-align: center; opacity: 0.5; }
+    td.size, td.modified { color: #777; font-size: 0.875rem; white-space: nowrap; }
+    .row-check {
+      width: 16px;
+      height: 16px;
+      cursor: pointer;
+    }
+    .no-download .row-check, .no-download #selection-bar, .no-download .btn-dl-zip, .no-download th.check-col, .no-download td.check-col {
+      display: none !important;
+    }
+    .status-row td {
+      padding: 3rem 1rem;
+      text-align: center;
+      color: #bbb;
+      font-size: 0.9rem;
+    }
+    .error-box {
+      background: #fff8f8;
+      border: 1px solid #f0cece;
+      border-radius: 8px;
+      padding: 2rem 1.5rem;
+      text-align: center;
+      color: #c00;
+    }
+    .error-box h2 { margin: 0 0 0.5rem; font-size: 1.05rem; }
+    .error-box p { margin: 0; color: #666; font-size: 0.875rem; }
+    .notice-banner {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      background: #fff9ec;
+      border: 1px solid #f2e2b8;
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      margin-bottom: 1.25rem;
+      color: #7a5a00;
+      font-size: 0.875rem;
+    }
+    .notice-banner .icon { flex-shrink: 0; font-size: 1rem; opacity: 0.8; }
+    .single-file-card {
+      background: #fff;
+      border: 1px solid #e8e8e8;
+      border-radius: 10px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+      padding: 2.5rem 2rem;
+      text-align: center;
+    }
+    .single-file-card .icon { font-size: 2.5rem; opacity: 0.4; margin-bottom: 0.75rem; }
+    .single-file-card .name { font-weight: 600; font-size: 1.05rem; margin-bottom: 0.25rem; word-break: break-all; }
+    .single-file-card .meta { color: #888; font-size: 0.85rem; margin-bottom: 1.5rem; }
+    .single-file-card a.btn-dl {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4em;
+      padding: 0.55rem 1.4rem;
+      font-size: 0.9375rem;
+      font-weight: 600;
+      color: #fff;
+      background: #0066cc;
+      border-radius: 6px;
+      text-decoration: none;
+    }
+    .single-file-card a.btn-dl:hover { background: #0055aa; }
+    .password-wrap {
+      display: flex;
+      justify-content: center;
+      padding: 4rem 1rem;
+    }
+    .password-card {
+      background: #fff;
+      box-shadow: 0 2px 20px rgba(0,0,0,0.08), 0 0 0 1px rgba(0,0,0,0.04);
+      border-radius: 10px;
+      padding: 2.25rem 2.5rem;
+      width: 100%;
+      max-width: 360px;
+      text-align: center;
+    }
+    .password-card h2 {
+      margin: 0 0 0.4rem;
+      font-size: 1.05rem;
+      font-weight: 600;
+      color: #111;
+      letter-spacing: -0.01em;
+    }
+    .password-card p {
+      margin: 0 0 1.5rem;
+      color: #777;
+      font-size: 0.875rem;
+      line-height: 1.5;
+    }
+    .password-card input[type="password"] {
+      width: 100%;
+      padding: 0.6rem 0.875rem;
+      font-size: 0.9375rem;
+      border: 1px solid #e0e0e0;
+      border-radius: 6px;
+      outline: none;
+      margin-bottom: 0.75rem;
+      transition: border-color 0.15s;
+    }
+    .password-card input[type="password"]:focus { border-color: #0066cc; box-shadow: 0 0 0 3px rgba(0,102,204,0.12); }
+    .password-card button {
+      width: 100%;
+      padding: 0.65rem 1rem;
+      font-size: 0.9375rem;
+      font-weight: 600;
+      color: #fff;
+      background: #0066cc;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .password-card button:hover { background: #0055aa; }
+    .password-card button:disabled { background: #a0c0e8; cursor: default; }
+    .password-error {
+      margin-top: 0.75rem;
+      font-size: 0.85rem;
+      color: #cc3333;
+    }
+    @media (max-width: 600px) {
+      th.size, td.size, th.modified, td.modified { display: none; }
+      header { padding: 0.875rem 1rem; }
+      main { padding: 1.5rem 1rem; }
+    }
+  </style>
+</head>
+<body>
+<header>
+  <h1><svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style="flex-shrink:0"><circle cx="15.5" cy="4" r="2.5" fill="#0066cc"/><circle cx="4.5" cy="10" r="2.5" fill="#0066cc"/><circle cx="15.5" cy="16" r="2.5" fill="#0066cc"/><line x1="6.8" y1="8.9" x2="13.2" y2="5.1" stroke="#0066cc" stroke-width="1.5" stroke-linecap="round"/><line x1="6.8" y1="11.1" x2="13.2" y2="14.9" stroke="#0066cc" stroke-width="1.5" stroke-linecap="round"/></svg>Download Files</h1>
+</header>
+<main>
+  {{if .Error}}
+  <div class="error-box">
+    <h2>{{.Error.Title}}</h2>
+    <p>{{.Error.Detail}}</p>
+  </div>
+  {{else}}
+  <div id="password-section"{{if not .IsPasswordProtected}} style="display:none"{{end}}>
+    <div class="password-wrap">
+      <div class="password-card">
+        <h2>Password Required</h2>
+        <p>This share is password-protected. Enter the password to continue.</p>
+        <input type="password" id="share-password" placeholder="Password" autocomplete="current-password"{{if .IsPasswordProtected}} autofocus{{end}}>
+        <button id="unlock-btn">Unlock</button>
+        <p id="password-error" class="password-error" hidden></p>
+      </div>
+    </div>
+  </div>
+
+  <div id="view-only-notice" class="notice-banner" style="display:none">
+    <span class="icon">&#8505;&#65039;</span>
+    <span>This share is view-only — downloading isn't available.</span>
+  </div>
+
+  <div id="single-file-section" style="display:none">
+    <div class="single-file-card">
+      <div class="icon">&#128196;</div>
+      <div class="name" id="single-file-name"></div>
+      <div class="meta" id="single-file-meta"></div>
+      <a href="#" id="single-file-dl-btn" class="btn-dl">&#8595; Download</a>
+    </div>
+  </div>
+
+  <div id="browse-section" class="{{if not .CanDownload}}no-download{{end}}" style="display:none">
+    <div class="toolbar">
+      <nav class="breadcrumb" id="breadcrumb"></nav>
+      <a id="dl-all-btn" href="#" class="btn-dl-zip">&#8595; Download Entire Share</a>
+    </div>
+    <div id="selection-bar">
+      <span id="selection-count">0 selected</span>
+      <span class="spacer"></span>
+      <a id="dl-selected-btn" href="#" class="btn-dl-zip">Download selected</a>
+      <button id="clear-selection-btn" type="button">Clear</button>
+    </div>
+    <div class="file-table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th class="check-col"></th>
+            <th>Name</th>
+            <th class="size">Size</th>
+            <th class="modified">Modified</th>
+          </tr>
+        </thead>
+        <tbody id="file-tbody">
+          <tr class="status-row"><td colspan="4">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {{end}}
+</main>
+
+{{if not .Error}}
+<script>
+(function () {
+  'use strict';
+
+  var permanentLink = {{.PermanentLink | js}};
+  var sharingLink   = {{.SharingLink | js}};
+
+  var passwordSection = document.getElementById('password-section');
+  var viewOnlyNotice  = document.getElementById('view-only-notice');
+  var singleFileSection = document.getElementById('single-file-section');
+  var browseSection   = document.getElementById('browse-section');
+  var tbody           = document.getElementById('file-tbody');
+  var breadcrumb      = document.getElementById('breadcrumb');
+  var dlAllBtn        = document.getElementById('dl-all-btn');
+  var selectionBar      = document.getElementById('selection-bar');
+  var selectionCount    = document.getElementById('selection-count');
+  var dlSelectedBtn     = document.getElementById('dl-selected-btn');
+  var clearSelectionBtn = document.getElementById('clear-selection-btn');
+
+  var shareName   = {{.ShareName | js}};
+  var isFolder    = {{.IsFolder}};
+  var rootFileId  = {{.RootFileID | js}};
+  var canDownload = {{.CanDownload}};
+  var fileSizeHuman = {{.FileSizeHuman | js}};
+  var fileModTime   = {{.ModTime | js}};
+
+  // pathStack: [{fileId, name}, ...] — breadcrumb trail from the share root.
+  var pathStack = [];
+  var selected = {}; // fileId -> { name, isDir }
+
+  // ── Password unlock ────────────────────────────────────────────────────────
+
+  var input  = document.getElementById('share-password');
+  var btn    = document.getElementById('unlock-btn');
+  var errEl  = document.getElementById('password-error');
+
+  function showPasswordError(msg) {
+    errEl.textContent = msg;
+    errEl.hidden = false;
+  }
+
+  function doUnlock() {
+    var password = input.value;
+    if (!password) { input.focus(); return; }
+
+    btn.disabled = true;
+    errEl.hidden = true;
+
+    fetch('/api/drive/browse/unlock', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: permanentLink, link: sharingLink, password: password })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.success) {
+          shareName   = data.shareName || '';
+          isFolder    = !!data.isFolder;
+          rootFileId  = data.rootFileId || '';
+          canDownload = !!data.canDownload;
+          if (!canDownload) { browseSection.classList.add('no-download'); }
+          passwordSection.style.display = 'none';
+          startBrowsing();
+        } else {
+          showPasswordError(data.error || 'Unlock failed.');
+          btn.disabled = false;
+          input.select();
+        }
+      })
+      .catch(function () {
+        showPasswordError('Network error — could not reach the server.');
+        btn.disabled = false;
+      });
+  }
+
+  if (btn) {
+    btn.addEventListener('click', doUnlock);
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { doUnlock(); }
+    });
+  }
+
+  // ── Single-file share ───────────────────────────────────────────────────────
+
+  function showSingleFile() {
+    singleFileSection.style.display = '';
+    document.getElementById('single-file-name').textContent = shareName;
+    document.getElementById('single-file-meta').textContent =
+      fileSizeHuman + (fileModTime ? ' · ' + fileModTime : '');
+    var dlBtn = document.getElementById('single-file-dl-btn');
+    if (!canDownload) {
+      dlBtn.style.display = 'none';
+    } else {
+      dlBtn.href = downloadURL(rootFileId, shareName);
+    }
+  }
+
+  // ── File browser ───────────────────────────────────────────────────────────
+
+  function downloadURL(fileId, name) {
+    return '/api/drive/browse/download'
+      + '?id=' + encodeURIComponent(permanentLink)
+      + '&link=' + encodeURIComponent(sharingLink)
+      + '&file_id=' + encodeURIComponent(fileId)
+      + '&name=' + encodeURIComponent(name || '');
+  }
+
+  function zipURL(fileIds, name) {
+    var url = '/api/drive/browse/download-zip'
+      + '?id=' + encodeURIComponent(permanentLink)
+      + '&link=' + encodeURIComponent(sharingLink);
+    for (var i = 0; i < fileIds.length; i++) {
+      url += '&file_id=' + encodeURIComponent(fileIds[i]);
+    }
+    url += '&name=' + encodeURIComponent(name || 'Download');
+    return url;
+  }
+
+  function startBrowsing() {
+    viewOnlyNotice.style.display = canDownload ? 'none' : '';
+
+    if (!isFolder) {
+      showSingleFile();
+      return;
+    }
+    browseSection.style.display = '';
+    dlAllBtn.href = zipURL([rootFileId], shareName);
+    pathStack = [{ fileId: rootFileId, name: shareName }];
+    loadFiles(rootFileId);
+    renderBreadcrumb();
+  }
+
+  function loadFiles(fileId) {
+    tbody.innerHTML = '<tr class="status-row"><td colspan="4">Loading…</td></tr>';
+    selected = {};
+    updateSelectionBar();
+
+    var url = '/api/drive/browse/list'
+      + '?id=' + encodeURIComponent(permanentLink)
+      + '&link=' + encodeURIComponent(sharingLink)
+      + '&file_id=' + encodeURIComponent(fileId);
+
+    fetch(url)
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!data.success) {
+          showListError(data.error || 'Failed to load files.');
+          return;
+        }
+        renderFiles(data.files || []);
+      })
+      .catch(function () { showListError('Network error — could not reach the server.'); });
+  }
+
+  function renderFiles(files) {
+    if (files.length === 0) {
+      tbody.innerHTML = '<tr class="status-row"><td colspan="4">This folder is empty.</td></tr>';
+      return;
+    }
+
+    var html = '';
+    for (var i = 0; i < files.length; i++) {
+      var f = files[i];
+      var nameCell;
+      if (f.is_dir) {
+        nameCell = '<a href="#" data-nav-into="' + escAttr(f.file_id) + '" data-nav-name="' + escAttr(f.name) + '">'
+          + '<span class="icon">&#128193;</span>' + escHTML(f.name) + '</a>';
+      } else if (canDownload) {
+        var dlURL = downloadURL(f.file_id, f.name);
+        nameCell = '<a href="' + escAttr(dlURL) + '" download="' + escAttr(f.name) + '">'
+          + '<span class="icon">&#128196;</span>' + escHTML(f.name) + '</a>';
+      } else {
+        // View-only share: files aren't downloadable, so don't render a link
+        // that would only ever trigger a failed download.
+        nameCell = '<span class="icon">&#128196;</span>' + escHTML(f.name);
+      }
+      html += '<tr data-file-id="' + escAttr(f.file_id) + '">'
+        + '<td class="check-col"><input type="checkbox" class="row-check" data-file-id="' + escAttr(f.file_id)
+        + '" data-name="' + escAttr(f.name) + '" data-is-dir="' + (f.is_dir ? '1' : '0') + '"></td>'
+        + '<td class="name">' + nameCell + '</td>'
+        + '<td class="size">'     + (f.is_dir ? '&mdash;' : escHTML(f.size_human)) + '</td>'
+        + '<td class="modified">' + escHTML(f.mtime) + '</td>'
+        + '</tr>';
+    }
+    tbody.innerHTML = html;
+
+    var navLinks = tbody.querySelectorAll('a[data-nav-into]');
+    for (var j = 0; j < navLinks.length; j++) {
+      navLinks[j].addEventListener('click', function (e) {
+        e.preventDefault();
+        navigateInto(this.getAttribute('data-nav-into'), this.getAttribute('data-nav-name'));
+      });
+    }
+
+    var checks = tbody.querySelectorAll('.row-check');
+    for (var k = 0; k < checks.length; k++) {
+      checks[k].addEventListener('change', function () {
+        var fid = this.getAttribute('data-file-id');
+        if (this.checked) {
+          selected[fid] = { name: this.getAttribute('data-name'), isDir: this.getAttribute('data-is-dir') === '1' };
+        } else {
+          delete selected[fid];
+        }
+        updateSelectionBar();
+      });
+    }
+  }
+
+  function navigateInto(fileId, name) {
+    pathStack.push({ fileId: fileId, name: name });
+    loadFiles(fileId);
+    renderBreadcrumb();
+  }
+
+  function navigateToIndex(index) {
+    pathStack = pathStack.slice(0, index + 1);
+    loadFiles(pathStack[pathStack.length - 1].fileId);
+    renderBreadcrumb();
+  }
+
+  function renderBreadcrumb() {
+    var html = '';
+    for (var i = 0; i < pathStack.length; i++) {
+      if (i === pathStack.length - 1) {
+        html += '<span class="current">' + escHTML(pathStack[i].name) + '</span>';
+      } else {
+        html += '<a href="#" data-nav-index="' + i + '">' + escHTML(pathStack[i].name) + '</a>'
+             + '<span class="sep">/</span>';
+      }
+    }
+    breadcrumb.innerHTML = html;
+
+    var navLinks = breadcrumb.querySelectorAll('a[data-nav-index]');
+    for (var j = 0; j < navLinks.length; j++) {
+      navLinks[j].addEventListener('click', function (e) {
+        e.preventDefault();
+        navigateToIndex(parseInt(this.getAttribute('data-nav-index'), 10));
+      });
+    }
+  }
+
+  function updateSelectionBar() {
+    var ids = Object.keys(selected);
+    if (ids.length === 0) {
+      selectionBar.classList.remove('active');
+      return;
+    }
+    selectionBar.classList.add('active');
+    selectionCount.textContent = ids.length + (ids.length === 1 ? ' selected' : ' selected');
+
+    if (ids.length === 1 && !selected[ids[0]].isDir) {
+      dlSelectedBtn.href = downloadURL(ids[0], selected[ids[0]].name);
+    } else {
+      dlSelectedBtn.href = zipURL(ids, 'Selected Files');
+    }
+  }
+
+  if (clearSelectionBtn) {
+    clearSelectionBtn.addEventListener('click', function () {
+      var checks = tbody.querySelectorAll('.row-check:checked');
+      for (var i = 0; i < checks.length; i++) { checks[i].checked = false; }
+      selected = {};
+      updateSelectionBar();
+    });
+  }
+
+  function showListError(msg) {
+    tbody.innerHTML = '<tr class="status-row"><td colspan="4">' + escHTML(msg) + '</td></tr>';
+  }
+
+  function escHTML(s) {
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function escAttr(s) { return escHTML(s); }
+
+  // Start loading immediately for non-password shares.
+  if (passwordSection.style.display === 'none') {
+    startBrowsing();
+  }
+})();
+</script>
+{{end}}
+</body>
+</html>
