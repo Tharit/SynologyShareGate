@@ -34,12 +34,14 @@ without clobbering each other's session:
 | Browse (`/d/s/`) | `drive-sharing-{sharing_link}` | opaque `sharing_token` |
 | Upload request (`/d/r/`) | `drive-request-{sharing_link}` | opaque `sharing_token` |
 
-The same `sharing_token` value is *also* sent as an explicit, JSON-quoted request
-parameter (`sharing_token="{token}"`) on almost every API call. There is no
-`X-Syno-Sharing`-style header as in FileStation/Photos — the cookie and the request
-parameter are the only carriers of the token. The upload endpoint itself (see below) is
-the one exception observed: its query string carries no `sharing_token` at all and it
-appears to rely on the cookie alone.
+The same `sharing_token` value is required on almost every API call, but the transport
+differs by endpoint:
+- Most endpoints: a JSON-quoted query/body parameter, `sharing_token="{token}"`.
+- The upload endpoint (`Files.upload`, see Flow 4): a **plain, non-quoted multipart form
+  field**, `sharing_token={token}` — not a query parameter.
+
+There is no `X-Syno-Sharing`-style header as in FileStation/Photos; the cookie and the
+request parameter/field are the only carriers of the token.
 
 For password-protected shares, the cookie is explicitly cleared on the initial page load
 (`Set-Cookie: drive-sharing-{link}=; expires=1970...`) until authentication succeeds.
@@ -105,10 +107,10 @@ Key fields:
 | `getDriveFile()` | Full node object for the shared file/folder (empty/absent pre-auth on password shares) |
 | `getDriveLink()` | Echoes `permanent_link` |
 | `getDriveSharingLink()` | Echoes `sharing_link` (empty for `/d/f/` links) |
-| `getDriveShareMode()` | Observed as `'public'` in all cases tested, including password and invite-only links — **not a reliable signal**, use `getDriveErrCode()` instead |
+| `getDriveShareMode()` | Always `'public'`, including on password and invite-only links — **not a reliable signal**, use `getDriveErrCode()` instead |
 
-When `getDriveErrCode()` is non-zero and it's `1037`, `getDriveFile()`'s body is empty
-(literally `return ;`) — treat that as "no data yet, show the password prompt".
+When `getDriveErrCode()` is `1037`, `getDriveFile()`'s body is empty (literally
+`return ;`) — treat that as "no data yet, show the password prompt".
 
 ### The shared node object (`getDriveFile()` / list items)
 
@@ -142,12 +144,12 @@ the folder listing API. Example (a plain-text file shared with view+download, no
 }
 ```
 
-- `type` (or `content_type: "dir"` vs anything else) distinguishes folder from file —
-  `type` is the more direct signal: `"dir"` for folders, `"file"` for everything else.
-- `adv_shared_info.has_password` reflects whether *this specific link* is password
-  protected (confirmed `true` on the authenticated re-fetch of a password link).
+- `type` distinguishes folder from file: `"dir"` for folders, `"file"` for everything
+  else (`content_type` carries a more specific value, e.g. `"document"`, `"image"`).
+- `adv_shared_info.has_password` reflects whether this specific link is password
+  protected.
 
-**Permission tiers, as observed on three otherwise-identical test files:**
+**Permission tiers:**
 
 | Link setting | `can_read` | `can_preview` | `can_download` | `can_write` | `can_comment` |
 |---|---|---|---|---|---|
@@ -155,11 +157,10 @@ the folder listing API. Example (a plain-text file shared with view+download, no
 | View + download | `true` | `true` | `true` | `false` | `false` |
 | View + download + edit | `true` | `true` | `true` | `true` | `true` |
 
-Quirk: `can_read` is `false` even though `can_preview` is `true` on view-only links —
-`can_preview` is the one that stays `true` across all tiers, `can_download` is the
-reliable download-permission signal, and `can_write` is the edit signal (`can_write`
-always implies `can_download` in the data observed, matching the "editing implies
-downloading" behavior described by the DSM UI).
+`can_preview` stays `true` across all tiers (even view-only, where `can_read` is
+`false`); `can_download` is the reliable download-permission signal, and `can_write` is
+the edit signal (`can_write` implies `can_download`, matching "editing implies
+downloading" in the DSM UI).
 
 ---
 
@@ -255,8 +256,8 @@ GET .../webapi/entry.cgi/{filename}
   `Content-Disposition: attachment; filename="..."`, streamed binary body.
 - Inline preview (used by the viewer, e.g. for the text/image preview pane):
   `force_download=false&is_preview=true`.
-- This streams directly — no async task involved — as long as exactly one, non-folder
-  item is requested.
+- Streams directly — no async task involved — as long as exactly one, non-folder item
+  is requested.
 
 ### Folder (or any multi-item) download — ZIP via async task
 
@@ -331,12 +332,17 @@ getDriveFileRequestHasDueDateHour = () => false
 ```
 
 These are plain `() => value` arrow functions assigning globals — parse with the same
-kind of targeted regex/brace-matching as the bootstrap script, no separate request
-required. `getDriveFileRequestState()` is the password signal: `"file_request_ok"` (no
-password) vs `"file_request_password"`.
+kind of targeted regex/brace-matching as the bootstrap script. `getDriveFileRequestState()`
+is the password signal: `"file_request_ok"` (no password) vs `"file_request_password"`.
 
 The `drive-request-{sharing_link}` cookie is set on this same response for public (no
 password) requests; for password-protected requests it is unset until auth succeeds.
+
+`SYNO.SynologyDrive.FileRequest.Public.get` (`sharing_link`, `sharing_token` →
+`description`/`file_id`/`file_request_id`/`identifier`/`title`/`due_date`/`uid`) is not
+needed: every field it returns duplicates one of the inline vars above (or the uploader's
+own display name, already known). It can be skipped entirely — go straight from step 1 to
+step 2 (or step 3 for public requests).
 
 ### Step 2 (password requests only) — Authenticate
 ```
@@ -347,56 +353,12 @@ api=SYNO.SynologyDrive.FileRequest.Public&method=auth&version=1
   &sharing_link="{sharing_link}"
 ```
 On success this sets `Set-Cookie: drive-request-{sharing_link}={sharing_token}` (response
-body observed empty — the cookie is the actual signal). `encryption` is a JSON array,
-suggesting room for other auth methods Synology hasn't needed to document.
+body is empty — the cookie is the actual signal). `encryption` is a JSON array,
+suggesting room for other auth methods.
 
-### Step 3 — Get request info (real client does this; likely skippable)
-```
-POST .../webapi/entry.cgi
-api=SYNO.SynologyDrive.FileRequest.Public&method=get&version=1
-  &sharing_link="{sharing_link}"
-  &sharing_token="{token}"
-```
-```json
-{
-  "data": {
-    "description": "Description bla bla bla",
-    "due_date": 0,
-    "file_id": "962069652524020178",
-    "file_request_id": "YdSLCQYI4nsz5juX",
-    "file_request_status": "active",
-    "identifier": "create_folder",
-    "title": "This is a test",
-    "uid": 1026
-  },
-  "success": true
-}
-```
-
-**This call is very likely unnecessary for our proxy.** Every field it returns is either
-already present in the inline `getDriveFileRequestXxx` vars from the landing page HTML
-(`description`, `file_id`, `file_request_id`, `identifier`, `title`, `due_date` ≈
-`getDriveFileRequestExpire`), or obtainable from the next call's response (`uid` is the
-owner's numeric id, `getDriveFileRequestCreator` already gives the display name). The one
-field with no inline equivalent, `file_request_status`, would only matter as a live
-"is this request still active" check — plausible if a tab is left open long enough for
-the request to expire, but not confirmed as load-bearing.
-
-Confirmed live: skipping this call entirely and going straight from the landing page's
-inline vars (plus the `sharing_token` read directly from the `drive-sharing`/`drive-request`
-cookie set on page load — no API call needed to obtain it either) to Step 4
-(`Files.create`) worked without any error. We were not able to cleanly re-confirm the
-following upload step in isolation — repeated attempts hit an unrelated `"blocked by
-flock"` error (code `1054`) that reproduced even against a brand-new target folder and
-filename, indicating a stuck server-side lock from earlier interrupted test uploads
-rather than anything caused by skipping this call. Since the upload endpoint's only
-observed auth dependency is the same cookie-derived `sharing_token` that already worked
-for `Files.create`, there's no mechanism by which this call would be required for it
-either — treat it as skippable, but be aware it hasn't been end-to-end verified.
-
-### Step 4 — Create a per-uploader subfolder
-The real client always creates a subfolder named after the uploader inside the target
-folder before uploading into it:
+### Step 3 — Create a per-uploader subfolder
+The real client creates a subfolder named after the uploader inside the target folder
+before uploading into it:
 ```
 POST .../webapi/entry.cgi
 api=SYNO.SynologyDrive.Files&method=create&version=2
@@ -410,10 +372,12 @@ Response: the new subfolder's node object (same shape as `getDriveFile()`), incl
 `file_id` — used as the upload destination in the next step. `conflict_action=autorename`
 means re-uploading under the same name creates `TestUser (1)`, etc., rather than erroring.
 
-### Step 5 — Upload the file (slice-upload protocol)
+### Step 4 — Upload the file (slice-upload protocol)
 
-This is a custom chunked-upload protocol, distinct from FileStation's single-POST
-`SYNO.FileStation.Upload` and Photos' single-POST `SYNO.Foto.Upload.PhotoRequestItem`:
+A custom chunked-upload protocol, distinct from FileStation's single-POST
+`SYNO.FileStation.Upload` and Photos' single-POST `SYNO.Foto.Upload.PhotoRequestItem`.
+Both requests below go to the same URL and share the same `X-Tmp-File` value, which
+correlates the two chunks server-side.
 
 **First request — reserve the upload:**
 ```
@@ -425,12 +389,16 @@ POST .../webapi/entry.cgi/SYNO.SynologyDrive.Files
 
 X-Type-Name: SLICEUPLOAD
 X-File-Chunk-End: false
-X-Tmp-File: {client-generated opaque id, e.g. a uuid}
+X-Tmp-File: {32-char lowercase hex id, e.g. an MD5-shaped string}
 Content-Type: multipart/form-data; boundary=...
+
+modified_time={file_mtime_unix_seconds.fractional}
+mute=false
+sharing_token={token}
+sharing_type=file_request
+file=(empty blob; filename "blob")
 ```
-No `sharing_token` query parameter is present on this endpoint — it relies on the
-`drive-request-{sharing_link}` cookie alone. This call carries no file bytes (or an
-empty file part); response:
+Response:
 ```json
 { "data": { "tmp_newly_created": true, "uploaded_size": 0 }, "success": true }
 ```
@@ -446,22 +414,40 @@ X-Type-Name: SLICEUPLOAD
 X-File-Chunk-End: true
 X-Tmp-File: {same id as the first request}
 Content-Type: multipart/form-data; boundary=...
+
+modified_time={file_mtime_unix_seconds.fractional}
+mute=false
+sharing_token={token}
+sharing_type=file_request
+file=(actual file bytes; filename "blob")
 ```
-(no `reserved_size` this time). Multipart body carries the actual file content under a
-`file` field. Response is the completed file's full node object (same shape as
-`getDriveFile()`), `success: true`.
+(no `reserved_size` this time). Response is the completed file's full node object (same
+shape as `getDriveFile()`), `success: true`.
 
-Both requests share the same `X-Tmp-File` value, which is how the server correlates
-chunks belonging to one logical upload. For a single small test file the real client
-still issues exactly these two requests (an empty reservation, then the full payload) —
-it does not appear to split file bytes across more than one data-carrying request for
-small files; presumably larger files would add more `X-File-Chunk-End: false` requests
-with real byte ranges in between. **Not confirmed:** combining `reserved_size` and
-`X-File-Chunk-End: true` into a single request was attempted and returned an HTTP 502
-from the backend — treat the two-step sequence as required rather than trying to
-collapse it.
+Requirements for this endpoint, both easy to get wrong since they aren't visible from the
+query string or a superficial network capture:
 
-### Step 6 — Notify the owner
+- **`X-Tmp-File` must be a plain 32-character lowercase hex string.** Any other format
+  (a UUID with dashes, a prefixed string) makes the *first* request fail with
+  `{"error":{"code":1054,"errors":{"message":"blocked by flock"}}}`.
+- **The multipart body must include `modified_time`, `mute`, `sharing_token`, and
+  `sharing_type` as plain (non-JSON-quoted) form fields**, alongside `file`. Omitting
+  `sharing_token`/`sharing_type` makes the *final* request fail with
+  `{"error":{"code":1002,"errors":{"message":"'no access permission when create'"}}}` —
+  the reservation request succeeds without them, but the final commit doesn't.
+- The `file` field's blob has no real filename — the client appends it via
+  `FormData.append('file', blob)` with no third argument, so it defaults to the literal
+  string `"blob"`. The actual destination filename comes entirely from the `path` query
+  parameter, not from the multipart part's `Content-Disposition: filename=`.
+
+For a single small file, exactly these two requests are issued (an empty reservation,
+then the full payload) — file bytes are not split across more than one data-carrying
+request for small files; larger files presumably add more `X-File-Chunk-End: false`
+requests with real byte ranges in between. Combining `reserved_size` and
+`X-File-Chunk-End: true` into a single request is not supported (returns HTTP 502); use
+the two-step sequence.
+
+### Step 5 — Notify the owner
 ```
 POST .../webapi/entry.cgi
 api=SYNO.SynologyDrive.FileRequest.Public&method=notify&version=1
@@ -491,15 +477,16 @@ synoQuote(s) = '"' + s.replace('\', '').replace('"', '') + '"'
 `SYNO.SynologyDrive.AdvanceSharing.Public.auth` and `SYNO.SynologyDrive.FileRequest.Public.auth`
 — FileStation/Photos' `SYNO.Core.Sharing.Login` leaves `password` unquoted.
 
-**Also quoted:** `sharing_link`, `permanent_link`, `sharing_token`, `path`, `sort_by`,
-`sort_direction`, `archive_name`, `download_type`, `task_id`, `uploader`, `request_title`,
-`type`, `conflict_action`, `sharing_type`.
+**Also quoted:** `sharing_link`, `permanent_link`, `sharing_token` (except in the upload
+multipart body, see below), `path`, `sort_by`, `sort_direction`, `archive_name`,
+`download_type`, `task_id`, `uploader`, `request_title`, `type`, `conflict_action`,
+`sharing_type` (except in the upload multipart body).
 
 **JSON arrays, still quoted as a whole:** `files=["id:..."]`, `upload_items=["name1"]`,
 `encryption=["password"]`, `filter={"include_transient":true}`.
 
-**Not quoted:** the multipart form fields of the slice-upload request; the custom
-`X-*` headers.
+**Not quoted:** the slice-upload multipart form fields (`modified_time`, `mute`,
+`sharing_token`, `sharing_type`, `file`); the custom `X-*` headers.
 
 ---
 
@@ -508,9 +495,9 @@ synoQuote(s) = '"' + s.replace('\', '').replace('"', '') + '"'
 | Code | Meaning |
 |---|---|
 | `0` | OK (`getDriveErrCode`) |
-| `1002` | Requires DSM account login (invite-only share) — not supported |
+| `1002` | Overloaded: `getDriveErrCode()` returns this for "requires DSM account login" (invite-only share, not supported); `Files.upload`'s final chunk returns it with message `"no access permission when create"` if the multipart body is missing `sharing_token`/`sharing_type` |
 | `1037` | Password required / wrong password |
-| `1054` | "blocked by flock" — observed on `Files.upload`; looked like a stuck server-side lock from an earlier interrupted upload attempt rather than a real request error (reproduced against a brand-new target folder/filename, so it wasn't a per-path lock) |
+| `1054` | `Files.upload`'s reservation request returns this with message `"blocked by flock"` if `X-Tmp-File` isn't a plain 32-char lowercase hex string |
 
 ---
 
@@ -540,17 +527,14 @@ synoQuote(s) = '"' + s.replace('\', '').replace('"', '') + '"'
 
 **Upload request (public):**
 1. `GET /drive/d/r/{id}/{link}` — parse inline `getDriveFileRequestState`/`getDriveFileId`/etc, get cookie (and the `sharing_token` it carries)
-2. ~~`SYNO.SynologyDrive.FileRequest.Public.get`~~ — real client calls this, but everything
-   it returns duplicates the inline vars from step 1; confirmed skippable for
-   `Files.create` (step 3), very likely skippable for `Files.upload` too (see note above)
-3. `SYNO.SynologyDrive.Files.create` (`type="folder"`) — create per-uploader subfolder
-4. `SYNO.SynologyDrive.Files.upload` ×2 (reserve, then final chunk) — per file
-5. `SYNO.SynologyDrive.FileRequest.Public.notify` — notify owner once per batch
+2. `SYNO.SynologyDrive.Files.create` (`type="folder"`) — create per-uploader subfolder
+3. `SYNO.SynologyDrive.Files.upload` ×2 (reserve, then final chunk) — per file
+4. `SYNO.SynologyDrive.FileRequest.Public.notify` — notify owner once per batch
 
 **Upload request (password-protected):**
 1. `GET /drive/d/r/{id}/{link}` — detect `getDriveFileRequestState() === "file_request_password"`
 2. `SYNO.SynologyDrive.FileRequest.Public.auth` — authenticate, get cookie
-3. Same as steps 2–5 above (`FileRequest.Public.get` likewise skippable)
+3. Same as steps 2–4 above
 
 ---
 
@@ -560,7 +544,7 @@ synoQuote(s) = '"' + s.replace('\', '').replace('"', '') + '"'
 |---|---|---|
 | Session bootstrap format | JSON-ish JS variable assignment / unquoted JS object | Executable JS assigning `window.getDriveXxx` functions, each returning valid JSON |
 | Upload-request metadata | Requires an API call (`get_photo_request_info`) or session parse | Embedded directly in the initial HTML as plain `() => value` assignments — no call needed |
-| Auth token transport | Cookie (`sharing_sid`) + `X-Syno-Sharing` header | Cookie (`drive-sharing-`/`drive-request-{link}`, name scoped per share) + `sharing_token` request parameter; no custom header |
+| Auth token transport | Cookie (`sharing_sid`) + `X-Syno-Sharing` header | Cookie (`drive-sharing-`/`drive-request-{link}`, name scoped per share) + `sharing_token` request parameter/field; no custom header |
 | Password quoting | `password` plain/unquoted in `SYNO.Core.Sharing.Login` | `password` JSON-quoted in both Drive auth endpoints |
 | Folder download | Direct streaming ZIP, single request | Async task: dry-run → start job → poll → download |
 | Upload protocol | Single multipart POST | Custom "SLICEUPLOAD" chunked protocol (`X-Tmp-File`, `X-File-Chunk-End`, `reserved_size`) across ≥2 requests |
