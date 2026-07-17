@@ -126,6 +126,7 @@ func main() {
 
 	sh := sharing.NewHandler(client, logger, cfg.MaxUploadBytes, cfg.DevMode)
 	ph := photo.NewHandler(client, logger, cfg.MaxUploadBytes, cfg.DevMode)
+	dh := drive.NewHandler(client, logger, cfg.MaxUploadBytes, cfg.DevMode)
 
 	// handlerTimeout covers the full round-trip for non-streaming routes:
 	// Synology context fetch (≤30 s) + API call (≤15 s) + response write.
@@ -138,13 +139,19 @@ func main() {
 	mux.Handle("GET /sharing/{id}", wrap(sh.Browse))
 	mux.Handle("GET /photo/mo/sharing/{id}", wrap(ph.BrowsePage))
 	mux.Handle("GET /photo/mo/request/{id}", wrap(ph.RequestPage))
-	mux.Handle("GET /drive/{id}", wrap(drive.HandlePage))
+	mux.Handle("GET /drive/d/s/{permanentLink}/{sharingLink}", wrap(dh.BrowseByLink))
+	mux.Handle("GET /drive/d/f/{permanentLink}", wrap(dh.BrowseInviteOnly))
+	mux.Handle("GET /drive/d/r/{fileRequestID}/{sharingLink}", wrap(dh.RequestPage))
 	mux.Handle("GET /api/sharing/list", wrap(sh.APIList))
 	mux.Handle("POST /api/sharing/unlock", wrap(sh.APIUnlock))
 	mux.Handle("GET /api/photo/list", wrap(ph.APIList))
 	mux.Handle("POST /api/photo/unlock", wrap(ph.APIUnlock))
 	mux.Handle("GET /api/photo/thumbnail", wrap(ph.APIThumbnail))
-	mux.Handle("GET /api/drive/", wrap(drive.HandleAPI))
+	mux.Handle("POST /api/drive/browse/unlock", wrap(dh.APIUnlockBrowse))
+	mux.Handle("GET /api/drive/browse/list", wrap(dh.APIList))
+	mux.Handle("POST /api/drive/upload/unlock", wrap(dh.APIUnlockRequest))
+	mux.Handle("POST /api/drive/upload/init", wrap(dh.APIUploadInit))
+	mux.Handle("POST /api/drive/upload/notify", wrap(dh.APIUploadNotify))
 
 	// Streaming handlers must not have a response deadline.
 	mux.HandleFunc("GET /api/sharing/download", sh.APIDownload)
@@ -153,6 +160,9 @@ func main() {
 	mux.HandleFunc("GET /api/photo/download", ph.APIDownload)
 	mux.HandleFunc("GET /api/photo/download-album", ph.APIDownloadAlbum)
 	mux.HandleFunc("POST /api/photo/upload", ph.APIUpload)
+	mux.HandleFunc("GET /api/drive/browse/download", dh.APIDownload)
+	mux.HandleFunc("GET /api/drive/browse/download-zip", dh.APIDownloadZip)
+	mux.HandleFunc("POST /api/drive/upload/file", dh.APIUploadFile)
 
 	// Middleware chain (outermost first):
 	// Logger → SecurityHeaders → RateLimit → GlobalConcurrency → mux
