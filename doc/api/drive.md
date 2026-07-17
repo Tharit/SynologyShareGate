@@ -130,7 +130,7 @@ the folder listing API. Example (a plain-text file shared with view+download, no
   "hash": "3b487cf6856af7e330bc4b1b7d977ef8",
   "modified_time": 1784126349,
   "created_time": 1784126392,
-  "owner": { "display_name": "martin", "name": "martin", "uid": 1026 },
+  "owner": { "display_name": "username", "name": "username", "uid": 1026 },
   "parent_id": "686134738643102457",
   "adv_shared": true,
   "adv_shared_info": { "created_time": 1784126403, "due_date": 0, "has_password": false },
@@ -321,9 +321,9 @@ getDriveLink = () => "194Hvk7eenZHK4qcuVqFJyxll0PLGpiz"        // target folder'
 getDriveSharingLink = () => "3A-xhFgd2MhkPPLGaraqE0u5x_cTLNCR-qLIAWFz2WQ0"
 getDriveFileRequestState = () => "file_request_ok"              // or "file_request_password"
 getDriveDSID = () => "dbf67fdb3d327908002332043ce6a758"
-getDriveFileRequestCreator = () => "martin"
+getDriveFileRequestCreator = () => "username"
 getDriveFileRequestTitle = () => "This is a test"
-getDriveFileRequestDescription = () => "Description bla bla bla"
+getDriveFileRequestDescription = () => "This is a dummy description"
 getDriveFileRequestIdentifier = () => "create_folder"
 getDriveFileRequestExpire = () => 0
 getDriveFileRequestId = () => "YdSLCQYI4nsz5juX"                 // echoes the URL's file_request_id
