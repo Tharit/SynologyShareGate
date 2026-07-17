@@ -56,6 +56,7 @@ type errorPage struct {
 type browseData struct {
 	ShareName           string
 	SharingID           string
+	IsFolder            bool
 	IsPasswordProtected bool
 	Error               *errorPage
 }
@@ -138,6 +139,7 @@ func (h *Handler) Browse(w http.ResponseWriter, r *http.Request) {
 	h.renderBrowse(w, &browseData{
 		ShareName: sc.Extra.Filename,
 		SharingID: id,
+		IsFolder:  sc.Extra.IsFolder,
 	})
 }
 
@@ -203,6 +205,7 @@ func (h *Handler) APIUnlock(w http.ResponseWriter, r *http.Request) {
 		"success":   true,
 		"shareName": sc.Extra.Filename,
 		"isUpload":  sc.IsUpload,
+		"isFolder":  sc.Extra.IsFolder,
 	})
 }
 

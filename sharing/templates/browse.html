@@ -102,6 +102,29 @@
     }
     .error-box h2 { margin: 0 0 0.5rem; font-size: 1.05rem; }
     .error-box p { margin: 0; color: #666; font-size: 0.875rem; }
+    .single-file-card {
+      background: #fff;
+      border: 1px solid #e8e8e8;
+      border-radius: 10px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+      padding: 2.5rem 2rem;
+      text-align: center;
+    }
+    .single-file-card .icon { font-size: 2.5rem; opacity: 0.4; margin-bottom: 0.75rem; }
+    .single-file-card .name { font-weight: 600; font-size: 1.05rem; margin-bottom: 1.5rem; word-break: break-all; }
+    .single-file-card a.btn-dl {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4em;
+      padding: 0.55rem 1.4rem;
+      font-size: 0.9375rem;
+      font-weight: 600;
+      color: #fff;
+      background: #0066cc;
+      border-radius: 6px;
+      text-decoration: none;
+    }
+    .single-file-card a.btn-dl:hover { background: #0055aa; }
     .password-wrap {
       display: flex;
       justify-content: center;
@@ -188,7 +211,14 @@
       </div>
     </div>
   </div>
-  <div id="browse-section"{{if .IsPasswordProtected}} style="display:none"{{end}}>
+  <div id="single-file-section" style="display:none">
+    <div class="single-file-card">
+      <div class="icon">&#128196;</div>
+      <div class="name" id="single-file-name"></div>
+      <a href="#" id="single-file-dl-btn" class="btn-dl">&#8595; Download</a>
+    </div>
+  </div>
+  <div id="browse-section" style="display:none">
     <div class="toolbar">
       <nav class="breadcrumb" id="breadcrumb"></nav>
       <a id="dl-zip-btn" href="#" class="btn-dl-zip">&#8595; Download ZIP</a>
@@ -218,9 +248,11 @@
 
   var sharingID = {{.SharingID | js}};
   var shareName = {{.ShareName | js}};
+  var isFolder  = {{.IsFolder}};
 
-  var passwordSection = document.getElementById('password-section');
-  var browseSection   = document.getElementById('browse-section');
+  var passwordSection   = document.getElementById('password-section');
+  var singleFileSection = document.getElementById('single-file-section');
+  var browseSection     = document.getElementById('browse-section');
   var tbody           = document.getElementById('file-tbody');
   var breadcrumb      = document.getElementById('breadcrumb');
   var dlZipBtn        = document.getElementById('dl-zip-btn');
@@ -259,9 +291,9 @@
             return;
           }
           shareName = data.shareName || '';
+          isFolder  = !!data.isFolder;
           passwordSection.style.display = 'none';
-          browseSection.style.display = '';
-          navigate('/');
+          startBrowsing();
         } else {
           showPasswordError(data.error || 'Unlock failed.');
           btn.disabled = false;
@@ -279,6 +311,31 @@
     input.addEventListener('keydown', function (e) {
       if (e.key === 'Enter') { doUnlock(); }
     });
+  }
+
+  // ── Single-file share ───────────────────────────────────────────────────────
+
+  function downloadURL(filePath) {
+    return '/api/sharing/download'
+      + '?id='   + encodeURIComponent(sharingID)
+      + '&path=' + encodeURIComponent(filePath);
+  }
+
+  function showSingleFile() {
+    singleFileSection.style.display = '';
+    document.getElementById('single-file-name').textContent = shareName;
+    var dlBtn = document.getElementById('single-file-dl-btn');
+    dlBtn.href = downloadURL('/');
+    dlBtn.setAttribute('download', shareName);
+  }
+
+  function startBrowsing() {
+    if (!isFolder) {
+      showSingleFile();
+      return;
+    }
+    browseSection.style.display = '';
+    navigate('/');
   }
 
   // ── File browser ───────────────────────────────────────────────────────────
@@ -329,10 +386,7 @@
         nameCell = '<a href="#" data-path="' + escAttr(f.path) + '">'
           + '<span class="icon">&#128193;</span>' + escHTML(f.name) + '</a>';
       } else {
-        var dlURL = '/api/sharing/download'
-          + '?id='   + encodeURIComponent(sharingID)
-          + '&path=' + encodeURIComponent(f.path);
-        nameCell = '<a href="' + escAttr(dlURL) + '" download="' + escAttr(f.name) + '">'
+        nameCell = '<a href="' + escAttr(downloadURL(f.path)) + '" download="' + escAttr(f.name) + '">'
           + '<span class="icon">&#128196;</span>' + escHTML(f.name) + '</a>';
       }
       html += '<tr>'
@@ -398,8 +452,8 @@
   function escAttr(s) { return escHTML(s); }
 
   // Start loading immediately for non-password shares.
-  if (browseSection.style.display !== 'none') {
-    navigate('/');
+  if (passwordSection.style.display === 'none') {
+    startBrowsing();
   }
 })();
 </script>
