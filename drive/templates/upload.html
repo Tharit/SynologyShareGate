@@ -278,7 +278,6 @@
   var fileRequestID = {{.FileRequestID | js}};
   var sharingLink    = {{.SharingLink | js}};
   var requestTitle   = {{.Title | js}};
-  var targetFolderId = {{.TargetFolderID | js}};
 
   var passwordSection = document.getElementById('password-section');
   var uploadSection   = document.getElementById('upload-section');
@@ -439,7 +438,7 @@
     fetch('/api/drive/upload/init', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: fileRequestID, link: sharingLink, uploaderName: name, targetFolderId: targetFolderId })
+      body: JSON.stringify({ id: fileRequestID, link: sharingLink, uploaderName: name })
     })
       .then(function(r) { return r.json(); })
       .then(function(data) {

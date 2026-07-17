@@ -2,6 +2,10 @@ package drive
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,6 +29,48 @@ func synoQuote(s string) string {
 	s = strings.ReplaceAll(s, `\`, "")
 	s = strings.ReplaceAll(s, `"`, "")
 	return `"` + s + `"`
+}
+
+// folderTokenKey signs the per-uploader subfolder id handed back to the client
+// after APIUploadInit (see signFolderToken). It's generated fresh per process
+// start and never persisted: this proxy keeps no server-side state, so a client
+// restarting its upload batch after a process restart is the same "session gone,
+// start over" behavior a Synology session-token expiry would already produce.
+var folderTokenKey = func() []byte {
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		panic("drive: failed to generate folder token key: " + err.Error())
+	}
+	return key
+}()
+
+// signFolderToken authenticates folderID (the per-uploader subfolder this proxy
+// itself created in APIUploadInit) by binding it to the file-request share that
+// created it, so a later APIUploadFile/APIUploadNotify call can't substitute an
+// arbitrary folder id — one belonging to a different share, or one never actually
+// created by this proxy — for the real one.
+func signFolderToken(fileRequestID, sharingLink, folderID string) string {
+	mac := hmac.New(sha256.New, folderTokenKey)
+	mac.Write([]byte(fileRequestID + "|" + sharingLink + "|" + folderID))
+	return folderID + "." + hex.EncodeToString(mac.Sum(nil))
+}
+
+// verifyFolderToken extracts and authenticates the folder id from a token
+// produced by signFolderToken, scoped to the same fileRequestID/sharingLink. The
+// digits before the "." must never be trusted on their own — only a value that
+// carries a valid signature for this exact share may reach a Synology API call.
+func verifyFolderToken(fileRequestID, sharingLink, token string) (string, error) {
+	folderID, sig, ok := strings.Cut(token, ".")
+	if !ok {
+		return "", fmt.Errorf("malformed folder token")
+	}
+	want := hmac.New(sha256.New, folderTokenKey)
+	want.Write([]byte(fileRequestID + "|" + sharingLink + "|" + folderID))
+	got, err := hex.DecodeString(sig)
+	if err != nil || !hmac.Equal(got, want.Sum(nil)) {
+		return "", fmt.Errorf("invalid folder token")
+	}
+	return folderID, nil
 }
 
 // DriveCapabilities mirrors the "capabilities" object present on every Drive node.

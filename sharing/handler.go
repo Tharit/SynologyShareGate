@@ -597,7 +597,7 @@ func sharingErrorPage(err error) *errorPage {
 		if httpErr.StatusCode == http.StatusNotFound {
 			return &errorPage{"Share Not Found", "This share link does not exist or has been removed."}
 		}
-		return &errorPage{"Server Error", fmt.Sprintf("The file server returned an unexpected response (%d).", httpErr.StatusCode)}
+		return &errorPage{"Server Error", "The file server returned an unexpected response."}
 	}
 	var synoErr *proxy.SynoError
 	if errors.As(err, &synoErr) {
@@ -609,7 +609,7 @@ func sharingErrorPage(err error) *errorPage {
 		case 408:
 			return &errorPage{"Invalid Share", "The share link is invalid."}
 		}
-		return &errorPage{"Share Error", fmt.Sprintf("The file server returned an error (%d).", synoErr.Code)}
+		return &errorPage{"Share Error", "The file server reported an unexpected error."}
 	}
 	return &errorPage{"Server Unavailable", "The file server could not be reached. Please try again later."}
 }

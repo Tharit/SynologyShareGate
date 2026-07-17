@@ -95,7 +95,6 @@ type uploadData struct {
 	SharingLink         string
 	Title               string
 	Description         string
-	TargetFolderID      string
 	IsPasswordProtected bool
 	Error               *errorPage
 }
@@ -192,7 +191,6 @@ func (h *Handler) RequestPage(w http.ResponseWriter, r *http.Request) {
 			SharingLink:         sharingLink,
 			Title:               rl.Title,
 			Description:         rl.Description,
-			TargetFolderID:      rl.FileID,
 			IsPasswordProtected: true,
 		})
 		return
@@ -200,11 +198,10 @@ func (h *Handler) RequestPage(w http.ResponseWriter, r *http.Request) {
 
 	h.setUploadCookie(w, tr.Value, tr.MaxAge, tr.Expires)
 	h.renderUpload(w, &uploadData{
-		FileRequestID:  fileRequestID,
-		SharingLink:    sharingLink,
-		Title:          rl.Title,
-		Description:    rl.Description,
-		TargetFolderID: rl.FileID,
+		FileRequestID: fileRequestID,
+		SharingLink:   sharingLink,
+		Title:         rl.Title,
+		Description:   rl.Description,
 	})
 }
 
@@ -476,16 +473,16 @@ func (h *Handler) APIDownloadZip(w http.ResponseWriter, r *http.Request) {
 }
 
 // APIUploadInit handles POST /api/drive/upload/init — creates the per-uploader
-// subfolder once at the start of an upload batch and returns its file_id.
-// Request body: JSON {"id", "link", "uploaderName", "targetFolderId"}.
+// subfolder once at the start of an upload batch and returns a signed token
+// identifying it (see signFolderToken).
+// Request body: JSON {"id", "link", "uploaderName"}.
 func (h *Handler) APIUploadInit(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 4<<10) // 4 KB cap
 
 	var req struct {
-		ID             string `json:"id"`
-		Link           string `json:"link"`
-		UploaderName   string `json:"uploaderName"`
-		TargetFolderID string `json:"targetFolderId"`
+		ID           string `json:"id"`
+		Link         string `json:"link"`
+		UploaderName string `json:"uploaderName"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
@@ -503,14 +500,32 @@ func (h *Handler) APIUploadInit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	uploaderName := sanitizeUploaderName(req.UploaderName)
-	if !validID(req.ID) || !validID(req.Link) || !validFileID(req.TargetFolderID) || uploaderName == "" {
+	if !validID(req.ID) || !validID(req.Link) || uploaderName == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
-			"success": false, "error": "missing or invalid id, link, targetFolderId, or uploaderName",
+			"success": false, "error": "missing or invalid id, link, or uploaderName",
 		})
 		return
 	}
 
-	folderID, err := CreateUploadFolder(r.Context(), h.client, req.ID, req.Link, sid, req.TargetFolderID, uploaderName)
+	// The target folder is never taken from the client: it's re-derived fresh from
+	// Synology on every call, the same way password auth already does, so a client
+	// can never redirect an upload batch to a folder of its own choosing.
+	rl, _, err := FetchRequestLanding(r.Context(), h.client, req.ID, req.Link)
+	if err != nil {
+		h.logger.Debug("drive upload-init landing error", middleware.F("err", err.Error()))
+		writeJSON(w, http.StatusBadGateway, map[string]any{
+			"success": false, "error": driveErrorPage(err).Title,
+		})
+		return
+	}
+	if !validFileID(rl.FileID) {
+		writeJSON(w, http.StatusBadGateway, map[string]any{
+			"success": false, "error": "could not resolve the share's target folder",
+		})
+		return
+	}
+
+	folderID, err := CreateUploadFolder(r.Context(), h.client, req.ID, req.Link, sid, rl.FileID, uploaderName)
 	if err != nil {
 		h.logger.Debug("drive upload-init error", middleware.F("err", err.Error()))
 		writeJSON(w, http.StatusBadGateway, map[string]any{
@@ -519,7 +534,10 @@ func (h *Handler) APIUploadInit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"success": true, "folderId": folderID})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success":  true,
+		"folderId": signFolderToken(req.ID, req.Link, folderID),
+	})
 }
 
 // APIUploadFile handles POST /api/drive/upload/file — streams one file into the
@@ -578,7 +596,7 @@ func (h *Handler) APIUploadFile(w http.ResponseWriter, r *http.Request) {
 			b, _ := io.ReadAll(io.LimitReader(part, 64))
 			link = strings.TrimSpace(string(b))
 		case "folder_id":
-			b, _ := io.ReadAll(io.LimitReader(part, 32))
+			b, _ := io.ReadAll(io.LimitReader(part, 128))
 			folderID = strings.TrimSpace(string(b))
 		case "file_size":
 			b, _ := io.ReadAll(io.LimitReader(part, 20))
@@ -604,14 +622,25 @@ func (h *Handler) APIUploadFile(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if !validID(id) || !validID(link) || !validFileID(folderID) || filePart == nil {
+	if !validID(id) || !validID(link) || !validFolderToken(folderID) || filePart == nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
 			"success": false, "error": "missing or invalid id, link, folder_id, or file field", "retryable": false,
 		})
 		return
 	}
 
-	if err := UploadFileSlice(r.Context(), h.client, id, link, sid, folderID, filename, fileSize, filePart); err != nil {
+	// folder_id is a token this proxy itself signed in APIUploadInit — verifying it
+	// here means a client can never substitute a folder id it wasn't handed for
+	// this exact share (see signFolderToken).
+	realFolderID, err := verifyFolderToken(id, link, folderID)
+	if err != nil {
+		writeJSON(w, http.StatusForbidden, map[string]any{
+			"success": false, "error": "invalid or expired upload session — please restart the upload", "retryable": false,
+		})
+		return
+	}
+
+	if err := UploadFileSlice(r.Context(), h.client, id, link, sid, realFolderID, filename, fileSize, filePart); err != nil {
 		var maxErr *http.MaxBytesError
 		if errors.As(err, &maxErr) {
 			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]any{
@@ -659,14 +688,25 @@ func (h *Handler) APIUploadNotify(w http.ResponseWriter, r *http.Request) {
 	}
 
 	uploaderName := sanitizeUploaderName(req.UploaderName)
-	if !validID(req.ID) || !validID(req.Link) || !validFileID(req.FolderID) || uploaderName == "" || len(req.Filenames) == 0 {
+	if !validID(req.ID) || !validID(req.Link) || !validFolderToken(req.FolderID) || uploaderName == "" || len(req.Filenames) == 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
 			"success": false, "error": "missing or invalid id, link, folderId, uploaderName, or filenames",
 		})
 		return
 	}
 
-	if err := NotifyUploadRequest(r.Context(), h.client, req.ID, req.Link, sid, uploaderName, req.RequestTitle, req.FolderID, req.Filenames); err != nil {
+	// folderId is a token this proxy itself signed in APIUploadInit — see
+	// signFolderToken's comment on APIUploadFile for why this must be verified
+	// rather than trusted as-is.
+	realFolderID, err := verifyFolderToken(req.ID, req.Link, req.FolderID)
+	if err != nil {
+		writeJSON(w, http.StatusForbidden, map[string]any{
+			"success": false, "error": "invalid or expired upload session — please restart the upload",
+		})
+		return
+	}
+
+	if err := NotifyUploadRequest(r.Context(), h.client, req.ID, req.Link, sid, uploaderName, req.RequestTitle, realFolderID, req.Filenames); err != nil {
 		h.logger.Debug("drive notify error", middleware.F("err", err.Error()))
 		writeJSON(w, http.StatusBadGateway, map[string]any{
 			"success": false, "error": driveErrorPage(err).Title,
@@ -768,7 +808,7 @@ func driveErrorPage(err error) *errorPage {
 		if httpErr.StatusCode == http.StatusNotFound {
 			return &errorPage{"Share Not Found", "This share link does not exist or has been removed."}
 		}
-		return &errorPage{"Server Error", fmt.Sprintf("The Drive server returned an unexpected response (%d).", httpErr.StatusCode)}
+		return &errorPage{"Server Error", "The Drive server returned an unexpected response."}
 	}
 	var synoErr *proxy.SynoError
 	if errors.As(err, &synoErr) {
@@ -778,7 +818,7 @@ func driveErrorPage(err error) *errorPage {
 		case 1054:
 			return &errorPage{"Upload Failed", "The Drive server rejected the upload. Please try again."}
 		}
-		return &errorPage{"Share Error", fmt.Sprintf("The Drive server returned an error (%d).", synoErr.Code)}
+		return &errorPage{"Share Error", "The Drive server reported an unexpected error."}
 	}
 	return &errorPage{"Server Unavailable", "The Drive server could not be reached. Please try again later."}
 }
@@ -825,6 +865,23 @@ func validFileID(id string) bool {
 	}
 	for _, ch := range id {
 		if ch < '0' || ch > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// validFolderToken checks only the shape of a token produced by signFolderToken
+// (a file_id, ".", and a 64-character lowercase-hex HMAC signature) — it does not
+// authenticate it. verifyFolderToken does the actual check and must always be
+// called before the extracted file_id is used in a Synology API call.
+func validFolderToken(token string) bool {
+	digits, sig, ok := strings.Cut(token, ".")
+	if !ok || len(sig) != 64 || !validFileID(digits) {
+		return false
+	}
+	for _, ch := range sig {
+		if (ch < '0' || ch > '9') && (ch < 'a' || ch > 'f') {
 			return false
 		}
 	}

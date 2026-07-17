@@ -133,7 +133,7 @@ equivalent Synology API calls directly, bypassing the proxy's own controls entir
 
 **Decision:** Accepted, for all backends.
 
-**Rationale:** The NAS is not internet-reachable; capturing the cookie requires being on
+**Rationale:** The NAS is not internet-reachable; using the cookie requires being on
 the internal network. More importantly, in every backend this token is not a secret
 independent of the share link — it is derived from (and, for password-protected shares,
 gated by the same password as) the share's own identifier, which is already embedded in
@@ -144,3 +144,25 @@ Synology without involving the proxy at all. A proxy-managed session layer (an o
 token mapped internally to the real one) would add significant complexity for no
 meaningful security gain, and would need to be re-justified independently for every
 backend rather than reasoned about once.
+
+---
+
+## SD-9 — Drive's upload-init and notify calls can be repeated without a real upload
+
+**Finding:** `POST /api/drive/upload/init` (creates the per-uploader subfolder) and
+`POST /api/drive/upload/notify` (emails the share owner that a batch finished) can each
+be called on their own, with no check that any file was actually uploaded in between.
+A client can repeatedly create empty per-uploader subfolders, and can call `notify` with
+fabricated filenames, without ever uploading real data.
+
+**Decision:** Accepted.
+
+**Rationale:** Preventing this would require the proxy to track, per batch, which files
+were actually uploaded before allowing `notify` to fire — server-side state this proxy
+deliberately does not keep (§3.2: no database, no session store, no on-disk cache;
+"stateless" is a hard invariant, not an implementation detail). The abuse this enables is
+spam/annoyance (fabricated notification emails, clutter from empty subfolders) directed at
+the share owner, not a way to reach the NAS or internal network beyond what the file-request
+link already grants — the same class of consequence a public, unauthenticated drop-box
+already accepts by design. Volume is already bounded by the existing per-IP rate limit and
+global concurrency cap (SD-2, SD-3).

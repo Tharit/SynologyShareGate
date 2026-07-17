@@ -1,6 +1,7 @@
 package photo
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"errors"
@@ -17,6 +18,26 @@ import (
 	"github.com/tharit/synologysharegate/middleware"
 	"github.com/tharit/synologysharegate/proxy"
 )
+
+// errDownloadDisabled is returned when a share's privacy_type is "public-view",
+// which does not permit downloads.
+var errDownloadDisabled = errors.New("downloads are not enabled for this share")
+
+// checkDownloadAllowed re-verifies the share's privacy_type before forwarding a
+// download request to the NAS. This proxy keeps no server-side session state, so
+// the only source of truth for "is this share downloadable right now" is the NAS
+// itself — a stale or forged client-side canDownload value must never be trusted
+// for this check. The landing page fetch needs no session cookie.
+func (h *Handler) checkDownloadAllowed(ctx context.Context, id string) error {
+	l, err := FetchLanding(ctx, h.client, basePathSharing, id)
+	if err != nil {
+		return err
+	}
+	if l.PrivacyType == "public-view" {
+		return errDownloadDisabled
+	}
+	return nil
+}
 
 //go:embed templates/*
 var templateFS embed.FS
@@ -385,6 +406,16 @@ func (h *Handler) APIDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := h.checkDownloadAllowed(r.Context(), id); err != nil {
+		if errors.Is(err, errDownloadDisabled) {
+			http.Error(w, "downloads are not enabled for this share", http.StatusForbidden)
+			return
+		}
+		h.logger.Debug("photo download permission check error", middleware.F("err", err.Error()))
+		http.Error(w, photoErrorPage(err).Title, http.StatusBadGateway)
+		return
+	}
+
 	itemIDs := make([]int64, 0, len(itemIDStrs))
 	for _, s := range itemIDStrs {
 		n, err := strconv.ParseInt(s, 10, 64)
@@ -454,6 +485,16 @@ func (h *Handler) APIDownloadAlbum(w http.ResponseWriter, r *http.Request) {
 
 	if !validID(id) {
 		http.Error(w, "missing or invalid id parameter", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.checkDownloadAllowed(r.Context(), id); err != nil {
+		if errors.Is(err, errDownloadDisabled) {
+			http.Error(w, "downloads are not enabled for this share", http.StatusForbidden)
+			return
+		}
+		h.logger.Debug("photo album download permission check error", middleware.F("err", err.Error()))
+		http.Error(w, photoErrorPage(err).Title, http.StatusBadGateway)
 		return
 	}
 
@@ -636,7 +677,7 @@ func photoErrorPage(err error) *errorPage {
 		if httpErr.StatusCode == http.StatusNotFound {
 			return &errorPage{"Share Not Found", "This share link does not exist or has been removed."}
 		}
-		return &errorPage{"Server Error", fmt.Sprintf("The photo server returned an unexpected response (%d).", httpErr.StatusCode)}
+		return &errorPage{"Server Error", "The photo server returned an unexpected response."}
 	}
 	var synoErr *proxy.SynoError
 	if errors.As(err, &synoErr) {
@@ -648,7 +689,7 @@ func photoErrorPage(err error) *errorPage {
 		case 408:
 			return &errorPage{"Invalid Share", "The share link is invalid."}
 		}
-		return &errorPage{"Share Error", fmt.Sprintf("The photo server returned an error (%d).", synoErr.Code)}
+		return &errorPage{"Share Error", "The photo server reported an unexpected error."}
 	}
 	return &errorPage{"Server Unavailable", "The photo server could not be reached. Please try again later."}
 }
