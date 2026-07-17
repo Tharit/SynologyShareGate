@@ -4,6 +4,14 @@ This file documents security findings that were reviewed and deliberately accept
 along with the rationale. It exists so future reviewers understand these are known,
 considered trade-offs — not oversights.
 
+Findings describe the actual security-relevant mechanism (a header directive, a cookie's
+provenance, a class of request) where that mechanism *is* the subject of the decision —
+that detail is what a future reviewer needs to re-verify the finding still holds. They
+deliberately avoid internal implementation trivia that can drift without changing the
+finding itself (exact environment-variable names, current numeric defaults, function
+names) — see `doc/spec.md` for the current architecture and `README.md` for current
+configuration values.
+
 ---
 
 ## SD-1 — CSP allows `unsafe-inline` scripts
@@ -13,64 +21,66 @@ because injected inline scripts would execute.
 
 **Decision:** Accepted.
 
-**Rationale:** All data is already escaped server-side (`html/template`) and client-side
-(`escHTML()`). More importantly, there are no credentials to steal via XSS: the session
-cookie is `HttpOnly` (JS cannot read it), and the only APIs exposed are scoped to a
-public share link the attacker must already possess. The XSS risk surface does not
-justify the refactor required to eliminate `unsafe-inline`.
+**Rationale:** All data is escaped before being rendered into HTML or scripts, both
+server-side and client-side. More importantly, there are no credentials to steal via
+XSS: the session cookie is `HttpOnly` (JS cannot read it), and the only APIs exposed are
+scoped to a public share link the attacker must already possess. The XSS risk surface
+does not justify the refactor required to eliminate `unsafe-inline`.
 
 ---
 
-## SD-2 — Rate limiter IP table uses a hard cap, not LRU eviction
+## SD-2 — Rate limiter tracks a bounded number of IPs, with no eviction of active ones
 
-**Finding:** Once `MAX_TRACKED_IPS` distinct IPs fill the rate-limiter table, all new IPs
-are rejected until the 5-minute cleanup cycle runs. An attacker with enough IPs could
-fill the table and deny access to legitimate users.
+**Finding:** The rate limiter's per-IP tracking table has a fixed maximum size. Once
+full, requests from any new IP are rejected until stale entries age out on the next
+periodic cleanup. An attacker with enough distinct IPs could fill the table and deny
+service to legitimate users in the meantime.
 
-**Decision:** Accepted. `MAX_TRACKED_IPS` is configurable; default (1000) is appropriate
-for expected traffic.
+**Decision:** Accepted. The table size is configurable; the default is sized for
+expected traffic.
 
-**Rationale:** LRU eviction is not a meaningful improvement — evicting the
-least-recently-seen IP effectively removes its rate-limit entry, allowing an attacker
-cycling through IPs to bypass rate limiting entirely for evicted addresses. The correct
-mitigation for a table-exhaustion attack at this scale is upstream (firewall, reverse-proxy
-connection limits), not in application code.
+**Rationale:** Evicting the least-recently-seen IP to make room (LRU) is not a
+meaningful improvement — it would remove that IP's rate-limit history, letting an
+attacker cycling through IPs bypass rate limiting entirely for evicted addresses. The
+correct mitigation for a table-exhaustion attack at this scale is upstream (firewall,
+reverse-proxy connection limits), not in application code.
 
 ---
 
 ## SD-3 — Global concurrency limit can be saturated by slow downloads
 
-**Finding:** The global concurrency semaphore (default: 5 slots) is shared across all
-endpoints. Five parallel long-running downloads hold all slots and block other users,
-including those making fast API calls.
+**Finding:** The global concurrency limit (a small, fixed pool of request slots) is
+shared across all endpoints. A handful of parallel long-running downloads can hold every
+slot and block other users, including those making fast API calls.
 
 **Decision:** Accepted.
 
-**Rationale:** Expected traffic is low. Separating streaming endpoints onto a different
-semaphore adds complexity that is not warranted at this scale.
+**Rationale:** Expected traffic is low. Separating streaming endpoints onto a separate
+limit adds complexity that is not warranted at this scale.
 
 ---
 
 ## SD-4 — Proxy does not terminate TLS natively
 
-**Finding:** The proxy speaks plain HTTP and relies on an upstream TLS-terminating reverse
-proxy. If that layer is absent or misconfigured, credentials and file contents travel
-in cleartext.
+**Finding:** The proxy speaks plain HTTP and relies on an upstream TLS-terminating
+reverse proxy. If that layer is absent or misconfigured, credentials and file contents
+travel in cleartext.
 
 **Decision:** Accepted. TLS termination at a reverse proxy is a required deployment
 constraint.
 
-**Rationale:** Adding optional `TLS_CERT`/`TLS_KEY` support adds complexity and certificate
-management burden. The deployment topology (reverse proxy in front) is standard and
-documented. `DEV_MODE=true` is available for local HTTP testing without weakening
-production defaults.
+**Rationale:** Adding native TLS support (certificate loading/renewal) adds complexity
+and certificate management burden the proxy shouldn't own. The deployment topology
+(reverse proxy in front) is standard and documented. A development-mode flag exists for
+local HTTP testing, without weakening production defaults.
 
 ---
 
 ## SD-5 — Synology `Content-Type` forwarded without a MIME allowlist
 
-**Finding:** The download handler forwards whatever `Content-Type` header Synology sends.
-A compromised NAS could instruct the proxy to serve `text/html` with script content.
+**Finding:** The download handler forwards whatever `Content-Type` header Synology
+sends. A compromised NAS could instruct the proxy to serve `text/html` with script
+content.
 
 **Decision:** Accepted.
 
@@ -114,18 +124,23 @@ Adding IP-normalisation logic to the rate limiter is not warranted.
 
 ---
 
-## SD-8 — Synology `sharing_sid` used directly as the browser session token
+## SD-8 — Synology's own session token is used directly as the browser session cookie
 
-**Finding:** The `sid` session cookie value is Synology's internal `sharing_sid`. Anyone
-who captures it could make Synology API calls directly, bypassing the proxy's controls.
+**Finding:** Every backend's session cookie value is the session token Synology itself
+issued for that share (FileStation/Photos: `sharing_sid`; Drive: a per-share
+`sharing_token`), forwarded as-is. Anyone who captures the cookie could make the
+equivalent Synology API calls directly, bypassing the proxy's own controls entirely.
 
-**Decision:** Accepted.
+**Decision:** Accepted, for all backends.
 
 **Rationale:** The NAS is not internet-reachable; capturing the cookie requires being on
-the internal network. More importantly, the `sharing_sid` is not a secret independent of
-the share link: it is derived from the sharing ID, which is embedded in the URL and visible
-in browser history, server access logs, and referrer headers everywhere the cookie could
-plausibly be intercepted. An attacker who can observe the cookie can observe the sharing ID
-and obtain an equivalent SID directly from Synology without involving the proxy at all.
-A proxy-managed session layer (opaque token → internal SID mapping) would add significant
-complexity for no meaningful security gain.
+the internal network. More importantly, in every backend this token is not a secret
+independent of the share link — it is derived from (and, for password-protected shares,
+gated by the same password as) the share's own identifier, which is already embedded in
+the URL and visible in browser history, server access logs, and referrer headers
+everywhere the cookie could plausibly be intercepted. An attacker who can observe the
+cookie can equally observe the share link and obtain an equivalent token directly from
+Synology without involving the proxy at all. A proxy-managed session layer (an opaque
+token mapped internally to the real one) would add significant complexity for no
+meaningful security gain, and would need to be re-justified independently for every
+backend rather than reasoned about once.
